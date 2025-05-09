@@ -1,0 +1,329 @@
+@use 'sass:color';
+@import 'leaflet/dist/leaflet.css';
+
+// Variáveis de cores
+$primary-color: #2e7d32; // Verde escuro
+$secondary-color: #4caf50; // Verde claro
+$background-color: #f5f5f5; // Cinza claro
+$text-color: #333;
+$border-color: #ddd;
+$danger-color: #d32f2f;
+
+// Estilos globais
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: $background-color;
+  color: $text-color;
+}
+
+// Container principal
+.app-container {
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+// Sistema de abas
+.tabs {
+  display: flex;
+  border-bottom: 2px solid $border-color;
+  padding: 10px 20px;
+  background-color: white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+  .tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    font-weight: bold;
+    color: $text-color;
+    transition: all 0.3s ease;
+
+    &.active {
+      color: $primary-color;
+      border-bottom: 3px solid $primary-color;
+      background-color: color.adjust($background-color, $lightness: 5%);
+    }
+
+    &:hover:not(.active) {
+      background-color: color.adjust($background-color, $lightness: 10%);
+    }
+  }
+}
+
+// Estilização das páginas
+.page {
+  flex: 1;
+  background-color: white;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+// Estilização de tabelas
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+
+  th, td {
+    border: 1px solid $border-color;
+    padding: 12px;
+    text-align: left;
+  }
+
+  th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+  }
+
+  tr:nth-child(even) {
+    background-color: color.adjust($background-color, $lightness: 2%);
+  }
+}
+
+// Estilização de botões
+button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background-color 0.3s ease;
+
+  &.primary {
+    background-color: $primary-color;
+    color: white;
+
+    &:hover {
+      background-color: color.adjust($primary-color, $lightness: -10%);
+    }
+  }
+
+  &.danger {
+    background-color: $danger-color;
+    color: white;
+
+    &:hover {
+      background-color: color.adjust($danger-color, $lightness: -10%);
+    }
+  }
+
+  &:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+  }
+}
+
+// Estilização de formulários
+form {
+  display: grid;
+  gap: 12px;
+  max-width: 400px;
+
+  input {
+    padding: 10px;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    font-size: 14px;
+
+    &:disabled {
+      background-color: $background-color;
+      cursor: not-allowed;
+    }
+
+    &[type="number"] {
+      appearance: textfield;
+      &::-webkit-inner-spin-button,
+      &::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+    }
+
+    &[type="color"] {
+      padding: 2px;
+      height: 40px;
+      cursor: pointer;
+    }
+  }
+
+  .input-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    input {
+      flex: 1;
+    }
+
+    span {
+      font-size: 14px;
+      color: $text-color;
+    }
+  }
+}
+
+// Estilização de mensagens
+.message {
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+
+  &.success {
+    background-color: color.adjust($secondary-color, $lightness: 40%);
+    color: $secondary-color;
+  }
+
+  &.error {
+    background-color: color.adjust($danger-color, $lightness: 40%);
+    color: $danger-color;
+  }
+}
+
+// Estilização do modal
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  max-width: 500px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+
+  h3 {
+    margin: 0;
+    color: $primary-color;
+  }
+
+  .close-button {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: $text-color;
+  }
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+// Estilização específica do mapa
+.map-page {
+  display: flex;
+  flex-direction: row;
+  height: calc(100vh - 60px);
+  width: 100%;
+}
+
+.map-controls {
+  padding: 10px 20px;
+  background-color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.map-container {
+  flex: 1;
+  height: 85vh;
+  width: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.polygon-label {
+  font-size: 12px;
+  font-weight: bold;
+  text-align: center;
+  color: #ffffff; // Cor branca para contraste
+  text-shadow: 1px 1px 2px #000000, -1px -1px 2px #000000, 1px -1px 2px #000000, -1px 1px 2px #000000; // Sombra para legibilidade
+  line-height: 1.2;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.sidebar {
+  width: 300px;
+  background-color: white;
+  border-left: 2px solid $border-color;
+  padding: 20px;
+  overflow-y: auto;
+  transition: transform 0.3s ease;
+  transform: translateX(0);
+  z-index: 2;
+
+  &.hidden {
+    transform: translateX(100%);
+  }
+
+  .sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+
+    h3 {
+      margin: 0;
+      color: $primary-color;
+    }
+
+    .close-button {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: $text-color;
+    }
+  }
+
+  table {
+    margin-top: 0;
+
+    th, td {
+      padding: 8px;
+    }
+
+    th {
+      background-color: #f2f2f2;
+      font-weight: bold;
+      text-align: left;
+    }
+
+    td {
+      text-align: left;
+    }
+  }
+}
