@@ -1,0 +1,45 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Builds
+dist/
+build/
+
+# Variáveis de ambiente
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Banco de dados SQLite (backend)
+*.db
+*.db-shm
+*.db-wal
+
+# Diretórios de upload temporários (backend)
+backend/uploads/
+
+# Arquivos gerados pelo TypeScript
+*.tsbuildinfo
+
+# Arquivos de log
+*.log
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Ferramentas de desenvolvimento
+.vscode/
+.idea/
+
+# Testes e cobertura
+coverage/
+
+# Arquivos temporários do Vite (frontend)
+vite.config.ts.timestamp-*

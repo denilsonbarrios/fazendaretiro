@@ -1,11 +1,4 @@
-import { useState, useEffect } from 'react';
-
-// Interface para KmlFile, definida localmente
-interface KmlFile {
-  id: string;
-  name: string;
-  content: string;
-}
+import { useState, useCallback, useEffect } from 'react';
 
 // Interface para Talhao, definida localmente
 interface Talhao {
@@ -23,38 +16,55 @@ interface Talhao {
   COR: string;
   qtde_plantas?: number;
   coordinates?: string;
+  ativo: boolean;
 }
 
-export function useMapData() {
-  const [kmls, setKmls] = useState<KmlFile[]>([]); // Não será mais usado no MapPage
+interface KmlFile {
+  id: string;
+  name: string;
+  content: string;
+}
+
+interface MapData {
+  talhoes: Talhao[];
+  kmlFiles: KmlFile[];
+  error: string | null;
+  fetchData: () => Promise<void>;
+}
+
+export function useMapData(): MapData {
   const [talhoes, setTalhoes] = useState<Talhao[]>([]);
+  const [kmlFiles, setKmlFiles] = useState<KmlFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
-      // Buscar KMLs (não será mais usado, mas mantido para compatibilidade com outros componentes)
-      const kmlResponse = await fetch(`${BASE_URL}/kml_files`);
-      if (!kmlResponse.ok) {
-        throw new Error('Erro ao buscar KMLs');
-      }
-      const kmlData = await kmlResponse.json();
-      setKmls(kmlData);
+      console.log(`[${new Date().toISOString()}] useMapData: Buscando talhoes`);
+      const talhoesResponse = await fetch(`${BASE_URL}/talhoes`);
+      if (!talhoesResponse.ok) throw new Error('Erro ao buscar talhões');
+      const talhoesData: Talhao[] = await talhoesResponse.json();
 
-      // Buscar talhões
-      const talhaoResponse = await fetch(`${BASE_URL}/talhoes`);
-      if (!talhaoResponse.ok) {
-        throw new Error('Erro ao buscar talhões');
-      }
-      const talhaoData = await talhaoResponse.json();
-      setTalhoes(talhaoData);
+      console.log(`[${new Date().toISOString()}] useMapData: Buscando kml_files`);
+      const kmlFilesResponse = await fetch(`${BASE_URL}/kml_files`);
+      if (!kmlFilesResponse.ok) throw new Error('Erro ao buscar arquivos KML');
+      const kmlFilesData: KmlFile[] = await kmlFilesResponse.json();
+
+      setTalhoes(talhoesData);
+      setKmlFiles(kmlFilesData);
+      setError(null);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
       setError(errorMessage);
-      console.error('Erro ao buscar dados:', errorMessage);
+      console.error('Erro no useMapData:', errorMessage);
     }
-  };
+  }, [BASE_URL]); // Dependência apenas de BASE_URL, que não muda
 
-  return { kmls, talhoes, error, fetchData };
+  // Carrega os dados automaticamente ao montar o hook
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { talhoes, kmlFiles, error, fetchData };
 }

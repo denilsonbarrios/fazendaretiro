@@ -7,14 +7,14 @@ import { initializeDatabase, generateId, runQuery, fetchQuery } from './db';
 import type { FeatureCollection, Polygon, MultiPolygon } from 'geojson';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // Configurar o multer para salvar arquivos no diretório 'uploads/'
 const upload = multer({ dest: 'uploads/' });
 
 // Enable CORS for requests from the frontend origin
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: ['http://localhost:5173', 'http://localhost:5000'], // Permitir frontend em portas diferentes
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type'],
 }));
@@ -59,13 +59,12 @@ const getWeeksBetween = (startDate: number, endDate: number): { weekOfYear: numb
   const end = new Date(endDate);
   const weeks: { weekOfYear: number, year: number }[] = [];
 
-  // Começar da data inicial e avançar semana por semana até a data final
   let currentDate = new Date(start);
   while (currentDate <= end) {
     const weekOfYear = getWeekOfYear(currentDate);
     const year = currentDate.getFullYear();
     weeks.push({ weekOfYear, year });
-    currentDate.setDate(currentDate.getDate() + 7); // Avançar uma semana
+    currentDate.setDate(currentDate.getDate() + 7);
   }
 
   return weeks;
@@ -78,7 +77,6 @@ app.post(
   asyncHandler(async (req, res, next) => {
     console.log('Received KML upload request');
 
-    // Verificar se o arquivo foi enviado
     if (!req.file) {
       console.log('No file uploaded');
       res.status(400).json({ error: 'No file uploaded' });
@@ -92,12 +90,10 @@ app.post(
       mimetype: req.file.mimetype,
     });
 
-    // Ler o conteúdo do arquivo KML
     const filePath = req.file.path;
     const kmlContent = await fs.readFile(filePath, 'utf-8');
     console.log('KML file read successfully, length:', kmlContent.length);
 
-    // Parsear o arquivo KML
     let geojson: FeatureCollection;
     try {
       geojson = parseKML(kmlContent);
@@ -109,14 +105,12 @@ app.post(
       return;
     }
 
-    // Validar o GeoJSON resultante
     if (!geojson || !geojson.features || geojson.features.length === 0) {
       console.log('No features found in KML');
       res.status(400).json({ error: 'No features found in KML file' });
       return;
     }
 
-    // Salvar o KML no banco de dados
     const kmlId = generateId();
     const kmlSql = `
       INSERT INTO kml_files (id, name, content)
@@ -125,11 +119,10 @@ app.post(
     await runQuery(kmlSql, [kmlId, req.file.originalname, kmlContent]);
     console.log('KML saved to database:', kmlId);
 
-    // Processar os polígonos e salvar os talhões
     const existingTalhaoIds = new Set<string>();
     const talhaoSql = `
-      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates, ativo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     for (const feature of geojson.features) {
@@ -153,6 +146,7 @@ app.post(
             COR: '#00FF00',
             qtde_plantas: 0,
             coordinates,
+            ativo: 1,
           };
           const talhaoIdGenerated = generateId();
           await runQuery(talhaoSql, [
@@ -170,6 +164,7 @@ app.post(
             talhao.COR,
             talhao.qtde_plantas || 0,
             talhao.coordinates,
+            talhao.ativo,
           ]);
           console.log(`Talhão criado: ${talhaoId}`);
           existingTalhaoIds.add(talhaoId);
@@ -181,7 +176,6 @@ app.post(
       }
     }
 
-    // Remover o arquivo temporário após o processamento
     await fs.unlink(filePath);
     console.log('Temporary file deleted:', filePath);
 
@@ -259,20 +253,18 @@ app.get(
   asyncHandler(async (req, res, next) => {
     const { id } = req.params;
 
-    // Buscar a safra para confirmar que existe
     const safra = await fetchQuery<any>('SELECT * FROM safras WHERE id = ?', [id]);
     if (!safra || safra.length === 0) {
       res.status(404).json({ error: 'Safra not found' });
       return;
     }
 
-    // Buscar o histórico de semanas de colheita
     const semanas = await fetchQuery<any>('SELECT semana_ano, semana_colheita FROM semanas_colheita WHERE safra_id = ? ORDER BY semana_ano', [id]);
     res.status(200).json(semanas);
   })
 );
 
-// Outros endpoints (exemplo, para listar KMLs)
+// Endpoint para listar KMLs
 app.get(
   '/kml_files',
   asyncHandler(async (req, res, next) => {
@@ -281,12 +273,47 @@ app.get(
   })
 );
 
-// Outros endpoints (exemplo, para listar talhões)
+// Endpoint para listar talhões
 app.get(
   '/talhoes',
   asyncHandler(async (req, res, next) => {
     const talhoes = await fetchQuery<any>('SELECT * FROM talhoes', []);
+    console.log('Talhões retornados:', talhoes.map((t: any) => ({
+      id: t.id,
+      TalhaoID: t.TalhaoID,
+      NOME: t.NOME,
+      ativo: t.ativo,
+    })));
     res.status(200).json(talhoes);
+  })
+);
+
+// Novo endpoint para calcular a produção de caixas de um talhão
+app.get(
+  '/talhoes/:id/producao_caixa',
+  asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    const { safra_id } = req.query;
+
+    if (!safra_id) {
+      res.status(400).json({ error: 'Missing required query parameter: safra_id is required' });
+      return;
+    }
+
+    const talhao = await fetchQuery<any>('SELECT * FROM talhoes WHERE id = ?', [id]);
+    if (!talhao || talhao.length === 0) {
+      res.status(404).json({ error: 'Talhao not found' });
+      return;
+    }
+
+    const carregamentos = await fetchQuery<any>(
+      'SELECT qte_caixa FROM carregamentos WHERE talhao_id = ? AND safra_id = ?',
+      [id, safra_id]
+    );
+
+    const totalCaixas = carregamentos.reduce((sum: number, c: any) => sum + c.qte_caixa, 0);
+
+    res.status(200).json({ totalCaixas });
   })
 );
 
@@ -296,33 +323,46 @@ app.get(
   asyncHandler(async (req, res, next) => {
     const { id } = req.params;
 
-    // Buscar o talhao pelo ID para obter o TalhaoID ou NOME
-    const talhao = await fetchQuery<any>('SELECT TalhaoID, NOME FROM talhoes WHERE id = ?', [id]);
+    const talhao = await fetchQuery<any>('SELECT TalhaoID, NOME, ativo FROM talhoes WHERE id = ?', [id]);
     if (!talhao || talhao.length === 0) {
+      console.log(`Talhão não encontrado para ID: ${id}`);
       res.status(404).json({ error: 'Talhao not found' });
       return;
     }
 
-    const { TalhaoID, NOME } = talhao[0];
+    const { TalhaoID, NOME, ativo } = talhao[0];
     const identifier = TalhaoID || NOME;
     if (!identifier) {
+      console.log(`Talhão ID: ${id} não possui TalhaoID ou NOME válido`);
       res.status(400).json({ error: 'Talhao does not have a valid TalhaoID or NOME to match with KML' });
       return;
     }
 
-    // Buscar o arquivo KML mais recente (assumindo que o último é o mais relevante)
+    if (!ativo) {
+      console.log(`Talhão ID: ${id} (TalhaoID/NOME: ${identifier}) está inativo, não buscando coordenadas no KML`);
+      res.status(410).json({ 
+        error: `Talhão ${identifier} está inativo e não possui coordenadas associadas`,
+        suggestion: 'Este talhão não está mais em uso. Registros históricos podem estar disponíveis, mas coordenadas não serão buscadas.'
+      });
+      return;
+    }
+
+    console.log(`Buscando KML para talhão ID: ${id}, identifier: ${identifier}`);
+
     const kmlFiles = await fetchQuery<any>('SELECT content FROM kml_files ORDER BY ROWID DESC LIMIT 1', []);
     if (!kmlFiles || kmlFiles.length === 0) {
+      console.log('Nenhum arquivo KML encontrado no banco de dados');
       res.status(404).json({ error: 'No KML files found in the database' });
       return;
     }
 
     const kmlContent = kmlFiles[0].content;
+    console.log(`KML encontrado, tamanho do conteúdo: ${kmlContent.length} caracteres`);
 
-    // Parsear o KML para obter as features
     let geojson: FeatureCollection;
     try {
       geojson = parseKML(kmlContent);
+      console.log(`KML parseado com sucesso, número de features: ${geojson.features.length}`);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error during KML parsing';
       console.error('Failed to parse KML:', errorMessage);
@@ -330,20 +370,25 @@ app.get(
       return;
     }
 
-    // Procurar a feature correspondente ao talhao
     const feature = geojson.features.find((f) => {
       const featureName = f.properties?.name || f.properties?.Name;
-      return featureName === identifier && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
+      const isMatch = featureName === identifier && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
+      console.log(`Verificando feature: name=${featureName}, type=${f.geometry.type}, match=${isMatch}`);
+      return isMatch;
     });
 
     if (!feature) {
-      res.status(404).json({ error: `No matching feature found in KML for TalhaoID/NOME: ${identifier}` });
+      console.log(`Nenhuma feature correspondente encontrada no KML para TalhaoID/NOME: ${identifier}`);
+      res.status(404).json({ 
+        error: `No matching feature found in KML for TalhaoID/NOME: ${identifier}`,
+        suggestion: 'Verifique se um arquivo KML com o talhão correspondente foi carregado e se o nome no KML corresponde ao TalhaoID ou NOME.'
+      });
       return;
     }
 
-    // Garantir que geometry é Polygon ou MultiPolygon e acessar coordinates
     const geometry = feature.geometry as Polygon | MultiPolygon;
     if (!geometry.coordinates) {
+      console.log('Geometria inválida: coordenadas não encontradas');
       res.status(500).json({ error: 'Unexpected geometry type: coordinates not found' });
       return;
     }
@@ -360,20 +405,17 @@ app.put(
     const { id } = req.params;
     const { coordinates } = req.body;
 
-    // Validação: coordinates é obrigatório
     if (!coordinates) {
       res.status(400).json({ error: 'Missing required field: coordinates is required' });
       return;
     }
 
-    // Buscar o talhao atual para confirmar que existe
     const talhaoAtual = await fetchQuery<any>('SELECT * FROM talhoes WHERE id = ?', [id]);
     if (!talhaoAtual || talhaoAtual.length === 0) {
       res.status(404).json({ error: 'Talhao not found' });
       return;
     }
 
-    // Atualizar apenas o campo coordinates
     const sql = `
       UPDATE talhoes
       SET coordinates = ?
@@ -403,18 +445,29 @@ app.post(
       COR,
       qtde_plantas,
       coordinates,
+      ativo,
     } = req.body;
 
-    // Validação básica: apenas NOME é obrigatório
     if (!NOME) {
       res.status(400).json({ error: 'Missing required field: NOME is required' });
       return;
     }
 
+    if (TalhaoID) {
+      const existingTalhao = await fetchQuery<any>(
+        'SELECT id FROM talhoes WHERE TalhaoID = ?',
+        [TalhaoID]
+      );
+      if (existingTalhao.length > 0) {
+        res.status(409).json({ error: `TalhaoID ${TalhaoID} já está em uso por outro talhão` });
+        return;
+      }
+    }
+
     const talhaoId = generateId();
     const sql = `
-      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates, ativo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await runQuery(sql, [
       talhaoId,
@@ -431,8 +484,9 @@ app.post(
       COR || null,
       qtde_plantas || null,
       coordinates ? JSON.stringify(coordinates) : null,
+      ativo !== undefined ? (ativo ? 1 : 0) : 1,
     ]);
-    console.log(`Talhao criado: ${talhaoId}`);
+    console.log(`Talhao criado: ${talhaoId}, TalhaoID: ${TalhaoID}, NOME: ${NOME}`);
     res.status(201).json({ message: 'Talhao created successfully', id: talhaoId });
   })
 );
@@ -455,15 +509,14 @@ app.put(
       PRODUCAO_HECTARE,
       COR,
       qtde_plantas,
+      ativo,
     } = req.body;
 
-    // Validação básica: apenas NOME é obrigatório
     if (!NOME) {
       res.status(400).json({ error: 'Missing required field: NOME is required' });
       return;
     }
 
-    // Buscar o talhao atual para preservar os valores existentes
     const talhaoAtual = await fetchQuery<any>('SELECT * FROM talhoes WHERE id = ?', [id]);
     if (!talhaoAtual || talhaoAtual.length === 0) {
       res.status(404).json({ error: 'Talhao not found' });
@@ -472,10 +525,20 @@ app.put(
 
     const talhaoExistente = talhaoAtual[0];
 
-    // Atualizar os campos fornecidos, preservando os existentes e NÃO atualizando coordinates
+    if (TalhaoID && TalhaoID !== talhaoExistente.TalhaoID) {
+      const existingTalhaoWithId = await fetchQuery<any>(
+        'SELECT id FROM talhoes WHERE TalhaoID = ? AND id != ?',
+        [TalhaoID, id]
+      );
+      if (existingTalhaoWithId.length > 0) {
+        res.status(409).json({ error: `TalhaoID ${TalhaoID} já está em uso por outro talhão` });
+        return;
+      }
+    }
+
     const sql = `
       UPDATE talhoes
-      SET TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, PRODUCAO_CAIXA = ?, PRODUCAO_HECTARE = ?, COR = ?, qtde_plantas = ?
+      SET TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, PRODUCAO_CAIXA = ?, PRODUCAO_HECTARE = ?, COR = ?, qtde_plantas = ?, ativo = ?
       WHERE id = ?
     `;
     await runQuery(sql, [
@@ -491,9 +554,10 @@ app.put(
       PRODUCAO_HECTARE !== undefined ? PRODUCAO_HECTARE : talhaoExistente.PRODUCAO_HECTARE,
       COR !== undefined ? COR : talhaoExistente.COR,
       qtde_plantas !== undefined ? qtde_plantas : talhaoExistente.qtde_plantas,
+      ativo !== undefined ? (ativo ? 1 : 0) : talhaoExistente.ativo,
       id,
     ]);
-    console.log(`Talhao atualizado: ${id}`);
+    console.log(`Talhao atualizado: ${id}, novo TalhaoID: ${TalhaoID}`);
     res.status(200).json({ message: 'Talhao updated successfully' });
   })
 );
@@ -510,20 +574,53 @@ app.delete(
   })
 );
 
-// Endpoint para listar motoristas (para sugestões no frontend)
+// Endpoint para listar motoristas
 app.get(
   '/motoristas',
   asyncHandler(async (req, res, next) => {
     const { search } = req.query;
     let motoristas;
     if (search) {
-      // Converter o termo de busca para letras maiúsculas
       const searchTerm = search.toString().toUpperCase();
       motoristas = await fetchQuery<any>('SELECT * FROM motoristas WHERE nome LIKE ? ORDER BY nome', [`${searchTerm}%`]);
     } else {
       motoristas = await fetchQuery<any>('SELECT * FROM motoristas ORDER BY nome', []);
     }
     res.status(200).json(motoristas);
+  })
+);
+
+// Endpoint para criar um motorista
+app.post(
+  '/motoristas',
+  asyncHandler(async (req, res, next) => {
+    const { nome } = req.body;
+
+    if (!nome) {
+      res.status(400).json({ error: 'Nome do motorista é obrigatório' });
+      return;
+    }
+
+    const motoristaNome = nome.toUpperCase();
+
+    const existingMotorista = await fetchQuery<{ id: string }>(
+      'SELECT id FROM motoristas WHERE nome = ?',
+      [motoristaNome]
+    );
+
+    if (existingMotorista.length > 0) {
+      res.status(409).json({ error: 'Motorista já existe' });
+      return;
+    }
+
+    const motoristaId = generateId();
+    await runQuery(
+      'INSERT INTO motoristas (id, nome) VALUES (?, ?)',
+      [motoristaId, motoristaNome]
+    );
+
+    console.log(`Motorista criado: ${motoristaNome} (ID: ${motoristaId})`);
+    res.status(201).json({ id: motoristaId, nome: motoristaNome });
   })
 );
 
@@ -549,7 +646,6 @@ app.post(
       safra_id,
     } = req.body;
 
-    // Validação básica
     if (!data || !talhao_id || !safra_id || qte_caixa === undefined) {
       res.status(400).json({ error: 'Missing required fields: data, talhao_id, safra_id, and qte_caixa are required' });
       return;
@@ -557,7 +653,6 @@ app.post(
 
     console.log(`Recebido talhao_id: ${talhao_id}`);
 
-    // Buscar o talhão para obter qtde_plantas e variedade
     const talhao = await fetchQuery<any>('SELECT id, NOME, qtde_plantas, VARIEDADE as variedade FROM talhoes WHERE id = ?', [talhao_id]);
     if (!talhao || talhao.length === 0) {
       console.log(`Talhão não encontrado para talhao_id: ${talhao_id}`);
@@ -568,7 +663,6 @@ app.post(
     const { qtde_plantas, variedade, NOME } = talhao[0];
     console.log(`Talhão encontrado: ID=${talhao_id}, NOME=${NOME}, qtde_plantas=${qtde_plantas}, variedade=${variedade}`);
 
-    // Buscar a safra para obter a data inicial da colheita
     const safra = await fetchQuery<any>('SELECT data_inicial_colheita FROM safras WHERE id = ?', [safra_id]);
     if (!safra || safra.length === 0) {
       res.status(404).json({ error: 'Safra not found' });
@@ -577,26 +671,22 @@ app.post(
 
     const dataInicialColheita = safra[0].data_inicial_colheita;
 
-    // Calcular a semana do ano do carregamento
     const carregamentoDate = new Date(data);
     const semanaAno = getWeekOfYear(carregamentoDate);
     console.log(`Semana do ano para ${carregamentoDate.toISOString()}: ${semanaAno}`);
 
-    // Calcular a semana da colheita (se data_inicial_colheita estiver definida)
     let semanaColheita = null;
     if (dataInicialColheita) {
       semanaColheita = getWeeksDifference(dataInicialColheita, data);
       console.log(`Semana da colheita (início: ${new Date(dataInicialColheita).toISOString()}, carregamento: ${carregamentoDate.toISOString()}): ${semanaColheita}`);
 
-      // Atualizar a tabela semanas_colheita com todas as semanas desde o início até o carregamento
       const weeksBetween = getWeeksBetween(dataInicialColheita, data);
       for (const week of weeksBetween) {
         const weekOfYear = week.weekOfYear;
         const weekYear = week.year;
-        const referenceDate = new Date(weekYear, 0, (weekOfYear - 1) * 7 + 1); // Aproximação da data da semana
+        const referenceDate = new Date(weekYear, 0, (weekOfYear - 1) * 7 + 1);
         const semanaColheitaForWeek = getWeeksDifference(dataInicialColheita, referenceDate.getTime());
 
-        // Verificar se a semana já existe na tabela semanas_colheita
         const existingWeek = await fetchQuery<any>(
           'SELECT * FROM semanas_colheita WHERE safra_id = ? AND semana_ano = ?',
           [safra_id, weekOfYear]
@@ -614,10 +704,9 @@ app.post(
       }
     }
 
-    // Gerenciar o motorista (converter para letras maiúsculas e criar se não existir)
     let motoristaNome = motorista?.trim();
     if (motoristaNome) {
-      motoristaNome = motoristaNome.toUpperCase(); // Converter para letras maiúsculas
+      motoristaNome = motoristaNome.toUpperCase();
       const existingMotorista = await fetchQuery<any>('SELECT * FROM motoristas WHERE nome = ?', [motoristaNome]);
       if (!existingMotorista || existingMotorista.length === 0) {
         const motoristaId = generateId();
@@ -626,7 +715,6 @@ app.post(
       }
     }
 
-    // Calcular o total acumulado para a safra até a data do carregamento
     const carregamentosAnteriores = await fetchQuery<any>(
       'SELECT qte_caixa FROM carregamentos WHERE safra_id = ? AND data <= ?',
       [safra_id, data]
@@ -671,13 +759,11 @@ app.put(
       safra_id,
     } = req.body;
 
-    // Validação básica
     if (!data || !talhao_id || !safra_id || qte_caixa === undefined) {
       res.status(400).json({ error: 'Missing required fields: data, talhao_id, safra_id, and qte_caixa are required' });
       return;
     }
 
-    // Verificar se o carregamento existe
     const carregamentoAtual = await fetchQuery<any>('SELECT * FROM carregamentos WHERE id = ?', [id]);
     if (!carregamentoAtual || carregamentoAtual.length === 0) {
       res.status(404).json({ error: 'Carregamento not found' });
@@ -686,7 +772,6 @@ app.put(
 
     console.log(`Recebido talhao_id para atualização: ${talhao_id}`);
 
-    // Buscar o talhão para obter qtde_plantas e variedade
     const talhao = await fetchQuery<any>('SELECT id, NOME, qtde_plantas, VARIEDADE as variedade FROM talhoes WHERE id = ?', [talhao_id]);
     if (!talhao || talhao.length === 0) {
       console.log(`Talhão não encontrado para talhao_id: ${talhao_id}`);
@@ -697,7 +782,6 @@ app.put(
     const { qtde_plantas, variedade, NOME } = talhao[0];
     console.log(`Talhão encontrado: ID=${talhao_id}, NOME=${NOME}, qtde_plantas=${qtde_plantas}, variedade=${variedade}`);
 
-    // Buscar a safra para obter a data inicial da colheita
     const safra = await fetchQuery<any>('SELECT data_inicial_colheita FROM safras WHERE id = ?', [safra_id]);
     if (!safra || safra.length === 0) {
       res.status(404).json({ error: 'Safra not found' });
@@ -706,26 +790,22 @@ app.put(
 
     const dataInicialColheita = safra[0].data_inicial_colheita;
 
-    // Calcular a semana do ano do carregamento
     const carregamentoDate = new Date(data);
     const semanaAno = getWeekOfYear(carregamentoDate);
     console.log(`Semana do ano para ${carregamentoDate.toISOString()}: ${semanaAno}`);
 
-    // Calcular a semana da colheita (se data_inicial_colheita estiver definida)
     let semanaColheita = null;
     if (dataInicialColheita) {
       semanaColheita = getWeeksDifference(dataInicialColheita, data);
       console.log(`Semana da colheita (início: ${new Date(dataInicialColheita).toISOString()}, carregamento: ${carregamentoDate.toISOString()}): ${semanaColheita}`);
 
-      // Atualizar a tabela semanas_colheita com todas as semanas desde o início até o carregamento
       const weeksBetween = getWeeksBetween(dataInicialColheita, data);
       for (const week of weeksBetween) {
         const weekOfYear = week.weekOfYear;
         const weekYear = week.year;
-        const referenceDate = new Date(weekYear, 0, (weekOfYear - 1) * 7 + 1); // Aproximação da data da semana
+        const referenceDate = new Date(weekYear, 0, (weekOfYear - 1) * 7 + 1);
         const semanaColheitaForWeek = getWeeksDifference(dataInicialColheita, referenceDate.getTime());
 
-        // Verificar se a semana já existe na tabela semanas_colheita
         const existingWeek = await fetchQuery<any>(
           'SELECT * FROM semanas_colheita WHERE safra_id = ? AND semana_ano = ?',
           [safra_id, weekOfYear]
@@ -743,10 +823,9 @@ app.put(
       }
     }
 
-    // Gerenciar o motorista (converter para letras maiúsculas e criar se não existir)
     let motoristaNome = motorista?.trim();
     if (motoristaNome) {
-      motoristaNome = motoristaNome.toUpperCase(); // Converter para letras maiúsculas
+      motoristaNome = motoristaNome.toUpperCase();
       const existingMotorista = await fetchQuery<any>('SELECT * FROM motoristas WHERE nome = ?', [motoristaNome]);
       if (!existingMotorista || existingMotorista.length === 0) {
         const motoristaId = generateId();
@@ -755,14 +834,12 @@ app.put(
       }
     }
 
-    // Recalcular o total acumulado para a safra até a data do carregamento
     const carregamentosAnteriores = await fetchQuery<any>(
       'SELECT qte_caixa FROM carregamentos WHERE safra_id = ? AND data <= ? AND id != ?',
       [safra_id, data, id]
     );
     const totalAcumulado = carregamentosAnteriores.reduce((sum, carregamento) => sum + (carregamento.qte_caixa || 0), 0) + qte_caixa;
 
-    // Atualizar o carregamento
     const sql = `
       UPDATE carregamentos
       SET data = ?, talhao_id = ?, qtde_plantas = ?, variedade = ?, motorista = ?, placa = ?, qte_caixa = ?, total = ?, semana = ?, semana_colheita = ?, safra_id = ?
@@ -794,7 +871,6 @@ app.delete(
   asyncHandler(async (req, res, next) => {
     const { id } = req.params;
 
-    // Verificar se o carregamento existe
     const carregamento = await fetchQuery<any>('SELECT * FROM carregamentos WHERE id = ?', [id]);
     if (!carregamento || carregamento.length === 0) {
       res.status(404).json({ error: 'Carregamento not found' });
@@ -964,13 +1040,11 @@ app.post(
       qtde_caixas_prev_pe,
     } = req.body;
 
-    // Validação básica
     if (!talhao_id || !safra_id || qtde_caixas_prev_pe === undefined) {
       res.status(400).json({ error: 'Missing required fields: talhao_id, safra_id, and qtde_caixas_prev_pe are required' });
       return;
     }
 
-    // Buscar o talhão para copiar suas informações
     const talhao = await fetchQuery<any>('SELECT * FROM talhoes WHERE id = ?', [talhao_id]);
     if (!talhao || talhao.length === 0) {
       res.status(404).json({ error: 'Talhao not found' });
@@ -979,21 +1053,18 @@ app.post(
 
     const talhaoData = talhao[0];
 
-    // Buscar a safra para confirmar que existe
     const safra = await fetchQuery<any>('SELECT * FROM safras WHERE id = ?', [safra_id]);
     if (!safra || safra.length === 0) {
       res.status(404).json({ error: 'Safra not found' });
       return;
     }
 
-    // Verificar se já existe uma previsão para esse talhao_id e safra_id
     const existingPrevisao = await fetchQuery<any>(
       'SELECT * FROM previsoes WHERE talhao_id = ? AND safra_id = ?',
       [talhao_id, safra_id]
     );
 
     if (existingPrevisao.length > 0) {
-      // Atualizar a previsão existente
       const sql = `
         UPDATE previsoes
         SET talhao_nome = ?, variedade = ?, data_de_plantio = ?, idade = ?, qtde_plantas = ?, qtde_caixas_prev_pe = ?
@@ -1012,7 +1083,6 @@ app.post(
       console.log(`Previsão atualizada para talhao_id: ${talhao_id}, safra_id: ${safra_id}`);
       res.status(200).json({ message: 'Previsão updated successfully' });
     } else {
-      // Criar uma nova previsão
       const previsaoId = generateId();
       const sql = `
         INSERT INTO previsoes (id, talhao_id, safra_id, talhao_nome, variedade, data_de_plantio, idade, qtde_plantas, qtde_caixas_prev_pe)

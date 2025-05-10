@@ -88,9 +88,20 @@ export async function initializeDatabase(): Promise<void> {
         PRODUCAO_HECTARE INTEGER,
         COR TEXT,
         qtde_plantas INTEGER,
-        coordinates TEXT
+        coordinates TEXT,
+        ativo INTEGER DEFAULT 1 -- Novo campo com valor padrão 1 (Ativo)
       )
     `);
+
+    // Verificar e migrar a tabela talhoes
+    const tableTalhoesExists = await fetchQuery<any>("SELECT name FROM sqlite_master WHERE type='table' AND name='talhoes'", []);
+    if (tableTalhoesExists.length > 0) {
+      const hasAtivo = await columnExists('talhoes', 'ativo');
+      if (!hasAtivo) {
+        await runQuery(`ALTER TABLE talhoes ADD COLUMN ativo INTEGER DEFAULT 1`);
+        console.log('Adicionado campo ativo à tabela talhoes com valor padrão 1 (Ativo)');
+      }
+    }
 
     // Tabela tipo_configs
     await runQuery(`

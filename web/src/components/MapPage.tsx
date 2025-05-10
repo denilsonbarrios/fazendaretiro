@@ -4,7 +4,7 @@ import { useMapData } from '../hooks/useMapData';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Interface para Talhao, definida localmente
+// Interface para Talhao
 interface Talhao {
   id: string;
   TalhaoID?: string;
@@ -20,6 +20,7 @@ interface Talhao {
   COR: string;
   qtde_plantas?: number;
   coordinates?: string;
+  ativo: boolean;
 }
 
 interface MapPageProps {
@@ -29,9 +30,26 @@ interface MapPageProps {
 export function MapPage({ safraId }: MapPageProps) {
   const { talhoes, error, fetchData } = useMapData();
   const [selectedTalhao, setSelectedTalhao] = useState<Talhao | null>(null);
+  const [producaoCaixa, setProducaoCaixa] = useState<number>(0);
   const mapRef = useRef<L.Map | null>(null);
   const initialZoomRef = useRef<number>(13);
   const hasSetBoundsRef = useRef<boolean>(false);
+
+  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
+
+  // Função para buscar a produção de caixas do talhão selecionado
+  const fetchProducaoCaixa = async (talhaoId: string) => {
+    if (!safraId) return;
+    try {
+      const response = await fetch(`${BASE_URL}/talhoes/${talhaoId}/producao_caixa?safra_id=${safraId}`);
+      if (!response.ok) throw new Error('Erro ao buscar produção de caixas');
+      const data = await response.json();
+      setProducaoCaixa(data.totalCaixas);
+    } catch (error) {
+      console.error('Erro ao carregar produção de caixas:', error);
+      setProducaoCaixa(0);
+    }
+  };
 
   function MapBounds() {
     const map = useMap();
@@ -43,7 +61,7 @@ export function MapPage({ safraId }: MapPageProps) {
       const bounds = L.latLngBounds([]);
 
       talhoes.forEach((talhao) => {
-        if (talhao.coordinates) {
+        if (talhao.coordinates && talhao.ativo) {
           try {
             const coordinates = JSON.parse(talhao.coordinates);
             const feature: GeoJSON.Feature<GeoJSON.Polygon> = {
@@ -83,7 +101,13 @@ export function MapPage({ safraId }: MapPageProps) {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [safraId]);
+
+  useEffect(() => {
+    if (selectedTalhao && safraId) {
+      fetchProducaoCaixa(selectedTalhao.id);
+    }
+  }, [selectedTalhao, safraId]);
 
   const getStyle = (talhao: Talhao) => {
     return {
@@ -93,14 +117,14 @@ export function MapPage({ safraId }: MapPageProps) {
     };
   };
 
-  // Calcular informações gerais da fazenda
   const calculateFarmStats = () => {
-    const totalPlants = talhoes.reduce((sum, talhao) => sum + (talhao.qtde_plantas || 0), 0);
-    const totalArea = talhoes.reduce((sum, talhao) => sum + (parseFloat(talhao.AREA) || 0), 0);
-    const averageAge = talhoes.length > 0
-      ? talhoes.reduce((sum, talhao) => sum + talhao.IDADE, 0) / talhoes.length
+    const activeTalhoes = talhoes.filter((talhao) => talhao.ativo);
+    const totalPlants = activeTalhoes.reduce((sum, talhao) => sum + (talhao.qtde_plantas || 0), 0);
+    const totalArea = activeTalhoes.reduce((sum, talhao) => sum + (parseFloat(talhao.AREA) || 0), 0);
+    const averageAge = activeTalhoes.length > 0
+      ? activeTalhoes.reduce((sum, talhao) => sum + talhao.IDADE, 0) / activeTalhoes.length
       : 0;
-    const totalTalhoes = talhoes.length;
+    const totalTalhoes = activeTalhoes.length;
 
     return {
       totalPlants,
@@ -110,11 +134,10 @@ export function MapPage({ safraId }: MapPageProps) {
     };
   };
 
-  // Obter variedades únicas e suas cores
   const getVarietiesLegend = () => {
     const varietiesMap = new Map<string, string>();
     talhoes.forEach((talhao) => {
-      if (talhao.VARIEDADE && talhao.COR && !varietiesMap.has(talhao.VARIEDADE)) {
+      if (talhao.ativo && talhao.VARIEDADE && talhao.COR && !varietiesMap.has(talhao.VARIEDADE)) {
         varietiesMap.set(talhao.VARIEDADE, talhao.COR);
       }
     });
@@ -161,6 +184,10 @@ export function MapPage({ safraId }: MapPageProps) {
             </LayersControl>
             {talhoes.length > 0 ? (
               talhoes.map((talhao, index) => {
+                if (!talhao.ativo) {
+                  console.log(`Talhão ${talhao.NOME} está inativo, não será exibido no mapa`);
+                  return null;
+                }
                 if (!talhao.coordinates) {
                   console.warn('MapPage: Talhão sem coordenadas:', talhao.TalhaoID);
                   return null;
@@ -178,9 +205,8 @@ export function MapPage({ safraId }: MapPageProps) {
                   };
                   const center = L.geoJSON(feature).getBounds().getCenter();
                   return (
-                    <>
+                    <div key={index}>
                       <Polygon
-                        key={index}
                         positions={positions}
                         pathOptions={getStyle(talhao)}
                         eventHandlers={{
@@ -210,7 +236,7 @@ export function MapPage({ safraId }: MapPageProps) {
                           iconAnchor: [0, 0],
                         })}
                       />
-                    </>
+                    </div>
                   );
                 } catch (error) {
                   console.error('Erro ao processar coordenadas do talhão', talhao.TalhaoID, ':', error);
@@ -396,25 +422,43 @@ export function MapPage({ safraId }: MapPageProps) {
                     borderBottom: '1px solid #ddd',
                     fontSize: '14px',
                     color: '#666',
+                  }}>Quantidade de Plantas</td>
+                  <td style={{
+                    padding: '10px',
+                    borderBottom: '1px solid #ddd',
+                    fontSize: '14px',
+                    color: '#333',
+                  }}>{selectedTalhao.qtde_plantas || 0}</td>
+                </tr>
+                <tr>
+                  <td style={{
+                    padding: '10px',
+                    borderBottom: '1px solid #ddd',
+                    fontSize: '14px',
+                    color: '#666',
                   }}>Produção Caixa</td>
                   <td style={{
                     padding: '10px',
                     borderBottom: '1px solid #ddd',
                     fontSize: '14px',
                     color: '#333',
-                  }}>{selectedTalhao.PRODUCAO_CAIXA}</td>
+                  }}>{producaoCaixa.toFixed(2)}</td>
                 </tr>
                 <tr>
                   <td style={{
                     padding: '10px',
                     fontSize: '14px',
                     color: '#666',
-                  }}>Produção Hectare</td>
+                  }}>Produção Caixa/Hectare</td>
                   <td style={{
                     padding: '10px',
                     fontSize: '14px',
                     color: '#333',
-                  }}>{selectedTalhao.PRODUCAO_HECTARE}</td>
+                  }}>
+                    {selectedTalhao.AREA && parseFloat(selectedTalhao.AREA) > 0
+                      ? (producaoCaixa / parseFloat(selectedTalhao.AREA)).toFixed(2)
+                      : 'N/A'}
+                  </td>
                 </tr>
               </tbody>
             </table>

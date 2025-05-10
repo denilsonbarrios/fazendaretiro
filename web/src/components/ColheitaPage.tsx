@@ -1,4 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import { ColheitaDashboard } from './ColheitaDashboard';
 
 // Interfaces ajustadas com base nas mudanças no backend
 interface Carregamento {
@@ -73,6 +77,7 @@ interface Talhao {
   PRODUCAO_HECTARE: number;
   COR: string;
   qtde_plantas?: number;
+  ativo: boolean;
 }
 
 interface DinamicaData {
@@ -90,7 +95,7 @@ interface CarregamentoFormData {
   talhao_id: string;
   motorista: string;
   placa: string;
-  qteCaixa: number | string; // Permitir string para lidar com valores vazios
+  qteCaixa: number | string;
 }
 
 interface ColheitaPageProps {
@@ -101,6 +106,19 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
   const [activeSubTab, setActiveSubTab] = useState<string>('carregamentos');
   const [carregamentos, setCarregamentos] = useState<Carregamento[]>([]);
   const [prevRealizado, setPrevRealizado] = useState<PrevRealizado[]>([]);
+  const [dinamicaData, setDinamicaData] = useState<DinamicaData[]>([]);
+  const [dinamicaFilters, setDinamicaFilters] = useState({
+    talhaoNome: '',
+    variedade: '',
+    totalCaixas: '',
+    mediaCaixasPorPlanta: '',
+  });
+  const [enrichedPrevRealizado, setEnrichedPrevRealizado] = useState<PrevRealizado[]>([]);
+  const [resumoGeral, setResumoGeral] = useState<{
+    data: { [variedade: string]: { previsto: number; realizado: number; proporcao: number } };
+    totalPrevisto: number;
+    totalRealizado: number;
+  }>({ data: {}, totalPrevisto: 0, totalRealizado: 0 });
   const [previsoes, setPrevisoes] = useState<Previsao[]>([]);
   const [semanasColheita, setSemanasColheita] = useState<SemanaColheita[]>([]);
   const [safras, setSafras] = useState<Safra[]>([]);
@@ -113,11 +131,21 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
   const [talhaoWarning, setTalhaoWarning] = useState<string>('');
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [previsaoFormData, setPrevisaoFormData] = useState<{ [talhaoId: string]: { safraId: string; qtdeCaixasPrevPe: number } }>({});
+  const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
   const generateId = (): string => {
     return Math.random().toString(36).substr(2, 9);
+  };
+
+  // Função auxiliar para formatar números no padrão brasileiro (ex.: 1.000,00)
+  const formatNumber = (value: number, decimals: number = 2): string => {
+    return new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    }).format(value);
   };
 
   const fetchCarregamentosData = async () => {
@@ -138,7 +166,7 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     if (!safraId) return;
     try {
       const response = await fetch(`${BASE_URL}/prev_realizado`);
-      if (!response.ok) throw new Error('Erro ao buscar PREV-REALIZADO');
+      if (!response.ok) throw new Error('Erro ao buscar RESUMO');
       const records = await response.json();
       const filteredRecords = records.filter((item: PrevRealizado) => item.safra_id === safraId);
       const enrichedRecords = filteredRecords.map((item: PrevRealizado) => {
@@ -151,7 +179,7 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       });
       setPrevRealizado(enrichedRecords);
     } catch (error) {
-      setMessage('Erro ao carregar PREV-REALIZADO: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      setMessage('Erro ao carregar RESUMO: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -207,8 +235,18 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       if (!response.ok) throw new Error('Erro ao buscar talhões');
       const records = await response.json();
       console.log('Talhões carregados:', records);
-      const filteredTalhoes = records.filter((talhao: Talhao) => talhao.TIPO === 'TALHAO');
-      console.log('Talhões filtrados (tipo TALHAO):', filteredTalhoes);
+      const filteredTalhoes = records.filter((talhao: Talhao) => {
+        if (!talhao.NOME) {
+          console.warn('Talhão sem NOME encontrado:', talhao);
+          return false;
+        }
+        if (!talhao.id) {
+          console.warn('Talhão sem ID encontrado:', talhao);
+          return false;
+        }
+        return talhao.TIPO === 'TALHAO';
+      });
+      console.log('Talhões filtrados (tipo TALHAO e com NOME):', filteredTalhoes);
       setTalhoes(filteredTalhoes);
     } catch (error) {
       setMessage('Erro ao carregar talhões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
@@ -227,6 +265,8 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
   };
 
   useEffect(() => {
+    if (!safraId) return;
+    console.log(`[${new Date().toISOString()}] useEffect disparado com safraId: ${safraId}`);
     fetchCarregamentosData();
     fetchPrevRealizadoData();
     fetchPrevisoesData();
@@ -235,20 +275,23 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     fetchTalhoesData();
   }, [safraId]);
 
+  // Função para calcular os dados da tela "Dinâmica"
   const calculateDinamica = (): DinamicaData[] => {
+    console.log('Calculando Dinâmica - Talhões:', talhoes, 'Carregamentos:', carregamentos);
     const dinamicaMap: { [key: string]: DinamicaData } = {};
 
     carregamentos.forEach((carregamento) => {
       const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
+      if (!talhao || !talhao.ativo) return; // Ignorar talhões inativos
       const talhaoNome = talhao ? talhao.NOME : 'Desconhecido';
       const qtdePlantas = carregamento.qtde_plantas || 0;
-      const key = `${carregamento.talhao_id}-${carregamento.variedade}`;
+      const key = `${carregamento.talhao_id}-${carregamento.variedade || talhao.VARIEDADE || 'Desconhecida'}`;
 
       if (!dinamicaMap[key]) {
         dinamicaMap[key] = {
           talhaoId: carregamento.talhao_id,
           talhaoNome: talhaoNome,
-          variedade: carregamento.variedade || 'Desconhecida',
+          variedade: carregamento.variedade || talhao.VARIEDADE || 'Desconhecida',
           totalCaixas: 0,
           qtdePlantas: qtdePlantas,
           mediaCaixasPorPlanta: 0,
@@ -258,16 +301,41 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       dinamicaMap[key].totalCaixas += carregamento.qte_caixa;
     });
 
-    Object.values(dinamicaMap).forEach((item) => {
+    const result = Object.values(dinamicaMap);
+    result.forEach((item) => {
       item.mediaCaixasPorPlanta = item.qtdePlantas > 0 ? item.totalCaixas / item.qtdePlantas : 0;
     });
 
-    return Object.values(dinamicaMap);
+    console.log('Dados da Dinâmica calculados:', result);
+    return result;
   };
 
-  const dinamicaData = calculateDinamica();
+  // Função para filtrar os dados da Dinâmica com base nos filtros
+  const filterDinamicaData = (data: DinamicaData[]): DinamicaData[] => {
+    return data.filter((item) => {
+      const matchesTalhaoNome = dinamicaFilters.talhaoNome
+        ? item.talhaoNome.toLowerCase().includes(dinamicaFilters.talhaoNome.toLowerCase())
+        : true;
+      const matchesVariedade = dinamicaFilters.variedade
+        ? item.variedade.toLowerCase().includes(dinamicaFilters.variedade.toLowerCase())
+        : true;
+      const matchesTotalCaixas = dinamicaFilters.totalCaixas
+        ? item.totalCaixas >= Number(dinamicaFilters.totalCaixas)
+        : true;
+      const matchesMediaCaixas = dinamicaFilters.mediaCaixasPorPlanta
+        ? item.mediaCaixasPorPlanta >= Number(dinamicaFilters.mediaCaixasPorPlanta)
+        : true;
 
-  const parseTalhaoName = (nome: string): { number: number; suffix: string } => {
+      return matchesTalhaoNome && matchesVariedade && matchesTotalCaixas && matchesMediaCaixas;
+    });
+  };
+
+  // Função para parsear o nome do talhão
+  const parseTalhaoName = (nome: string | undefined | null): { number: number; suffix: string } => {
+    if (!nome) {
+      console.warn('Nome do talhão é undefined ou null, retornando valores padrão');
+      return { number: 0, suffix: '' };
+    }
     const match = nome.match(/^(\d+)([A-Za-z]*)$/);
     if (match) {
       return {
@@ -278,7 +346,9 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     return { number: 0, suffix: nome };
   };
 
-  const calculatePrevRealizado = () => {
+  // Função para calcular os dados da tela "PREV-REALIZADO"
+  const calculatePrevRealizado = (): PrevRealizado[] => {
+    console.log('Calculando PREV-REALIZADO - Talhões:', talhoes, 'Carregamentos:', carregamentos, 'Previsões:', previsoes);
     const carregamentosPorTalhao: { [talhaoId: string]: { totalCaixas: number; qtdePlantas: number } } = {};
     carregamentos.forEach((carregamento) => {
       if (!carregamentosPorTalhao[carregamento.talhao_id]) {
@@ -290,7 +360,7 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       carregamentosPorTalhao[carregamento.talhao_id].totalCaixas += carregamento.qte_caixa;
     });
 
-    const sortedTalhoes = [...talhoes].sort((a, b) => {
+    const sortedTalhoes = [...talhoes].filter(talhao => talhao.NOME).sort((a, b) => {
       const parsedA = parseTalhaoName(a.NOME);
       const parsedB = parseTalhaoName(b.NOME);
 
@@ -301,62 +371,92 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       return parsedA.suffix.localeCompare(parsedB.suffix);
     });
 
-    const enrichedPrevRealizado = sortedTalhoes.map((talhao) => {
-      const prevEntry = prevRealizado.find((pr) => pr.talhao === talhao.TalhaoID) || {
-        id: generateId(),
-        talhao: talhao.NOME,
-        variedade: talhao.VARIEDADE || 'Desconhecida',
-        qtde_plantas: talhao.qtde_plantas || 0,
-        cx_pe_prev: 0,
-        cx_pe_realizado: 0,
-        total_cx_prev: 0,
-        total_cx_realizado: 0,
-        safra_id: safraId || '',
-      };
+    const enrichedPrevRealizado = sortedTalhoes
+      .map((talhao) => {
+        const prevEntry = prevRealizado.find((pr) => pr.talhao === talhao.TalhaoID) || {
+          id: generateId(),
+          talhao: talhao.NOME,
+          variedade: talhao.VARIEDADE || 'Desconhecida',
+          qtde_plantas: talhao.qtde_plantas || 0,
+          cx_pe_prev: 0,
+          cx_pe_realizado: 0,
+          total_cx_prev: 0,
+          total_cx_realizado: 0,
+          safra_id: safraId || '',
+        };
 
-      const carregamentoTalhao = carregamentosPorTalhao[talhao.id] || { totalCaixas: 0, qtdePlantas: talhao.qtde_plantas || 0 };
-      const totalCaixas = carregamentoTalhao.totalCaixas;
-      const qtdePlantas = talhao.qtde_plantas || 0;
-      const cxPeRealizado = qtdePlantas > 0 ? totalCaixas / qtdePlantas : 0;
+        const carregamentoTalhao = carregamentosPorTalhao[talhao.id] || { totalCaixas: 0, qtdePlantas: talhao.qtde_plantas || 0 };
+        const totalCaixas = carregamentoTalhao.totalCaixas;
+        const qtdePlantas = talhao.qtde_plantas || 0;
+        const cxPeRealizado = qtdePlantas > 0 ? totalCaixas / qtdePlantas : 0;
 
-      const previsao = previsoes.find((p) => p.talhao_id === talhao.id && p.safra_id === safraId);
-      const cxPePrev = previsao ? previsao.qtde_caixas_prev_pe : prevEntry.cx_pe_prev;
-      const totalCxPrev = qtdePlantas * (cxPePrev || 0);
-      const totalCxRealizado = totalCaixas;
+        const previsao = previsoes.find((p) => p.talhao_id === talhao.id && p.safra_id === safraId);
+        const cxPePrev = previsao ? previsao.qtde_caixas_prev_pe : prevEntry.cx_pe_prev;
+        const totalCxPrev = qtdePlantas * (cxPePrev || 0);
+        const totalCxRealizado = totalCaixas;
 
-      return {
-        ...prevEntry,
-        talhao: talhao.NOME,
-        variedade: talhao.VARIEDADE || 'Desconhecida',
-        qtde_plantas: qtdePlantas,
-        cx_pe_prev: cxPePrev,
-        cx_pe_realizado: cxPeRealizado,
-        total_cx_prev: totalCxPrev,
-        total_cx_realizado: totalCxRealizado,
-      };
-    });
+        return {
+          ...prevEntry,
+          talhao: talhao.NOME,
+          variedade: talhao.VARIEDADE || 'Desconhecida',
+          qtde_plantas: qtdePlantas,
+          cx_pe_prev: cxPePrev,
+          cx_pe_realizado: cxPeRealizado,
+          total_cx_prev: totalCxPrev,
+          total_cx_realizado: totalCxRealizado,
+        };
+      })
+      // Filtrar talhões "vazios" (sem previsão e sem realização)
+      .filter((item) => item.total_cx_prev > 0 || item.total_cx_realizado > 0);
 
+    console.log('Dados do PREV-REALIZADO calculados (filtrados):', enrichedPrevRealizado);
     return enrichedPrevRealizado;
   };
 
-  const enrichedPrevRealizado = calculatePrevRealizado();
-
-  const calculateResumoGeral = () => {
+  // Função para calcular o resumo geral e os totais
+  const calculateResumoGeral = (prevRealizadoData: PrevRealizado[]) => {
     const resumo: { [variedade: string]: { previsto: number; realizado: number; proporcao: number } } = {};
-    enrichedPrevRealizado.forEach((item) => {
+    let totalPrevisto = 0;
+    let totalRealizado = 0;
+
+    prevRealizadoData.forEach((item) => {
       if (!resumo[item.variedade]) {
         resumo[item.variedade] = { previsto: 0, realizado: 0, proporcao: 0 };
       }
       resumo[item.variedade].previsto += item.total_cx_prev;
       resumo[item.variedade].realizado += item.total_cx_realizado;
+
+      totalPrevisto += item.total_cx_prev;
+      totalRealizado += item.total_cx_realizado;
     });
+
+    // Filtrar variedades "vazias" (sem previsão e sem realização)
     Object.keys(resumo).forEach((variedade) => {
-      resumo[variedade].proporcao = resumo[variedade].previsto ? (resumo[variedade].realizado / resumo[variedade].previsto) * 100 : 0;
+      if (resumo[variedade].previsto === 0 && resumo[variedade].realizado === 0) {
+        delete resumo[variedade];
+      } else {
+        resumo[variedade].proporcao = resumo[variedade].previsto ? (resumo[variedade].realizado / resumo[variedade].previsto) * 100 : 0;
+      }
     });
-    return resumo;
+
+    console.log('Resumo Geral calculado (filtrado):', { data: resumo, totalPrevisto, totalRealizado });
+    return { data: resumo, totalPrevisto, totalRealizado };
   };
 
-  const resumoGeral = calculateResumoGeral();
+  // useEffect para recalcular "Dinâmica" e "PREV-REALIZADO" quando talhoes, carregamentos ou previsoes mudarem
+  useEffect(() => {
+    // Calcular "Dinâmica"
+    const newDinamicaData = calculateDinamica();
+    setDinamicaData(newDinamicaData);
+
+    // Calcular "PREV-REALIZADO"
+    const newEnrichedPrevRealizado = calculatePrevRealizado();
+    setEnrichedPrevRealizado(newEnrichedPrevRealizado);
+
+    // Calcular "Resumo Geral" com base no PREV-REALIZADO atualizado
+    const newResumoGeral = calculateResumoGeral(newEnrichedPrevRealizado);
+    setResumoGeral(newResumoGeral);
+  }, [talhoes, carregamentos, previsoes, prevRealizado, safraId]);
 
   const handleAddCarregamento = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -368,13 +468,18 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       return;
     }
 
+    if (!selectedTalhao.ativo) {
+      setMessage(`Erro: O talhão ${selectedTalhao.NOME} está inativo e não pode ser usado para carregamentos.`);
+      return;
+    }
+
     if (selectedTalhao.qtde_plantas === undefined || selectedTalhao.qtde_plantas === null) {
-      setMessage('Erro: O talhão selecionado não tem a quantidade de plantas preenchida. Por favor, atualize o talhão.');
+      setMessage(`Erro: O talhão ${selectedTalhao.NOME} não tem a quantidade de plantas preenchida. Por favor, atualize o talhão.`);
       return;
     }
 
     if (!selectedTalhao.VARIEDADE) {
-      setMessage('Erro: O talhão selecionado não tem a variedade preenchida. Por favor, atualize o talhão.');
+      setMessage(`Erro: O talhão ${selectedTalhao.NOME} não tem a variedade preenchida. Por favor, atualize o talhão.`);
       return;
     }
 
@@ -417,6 +522,12 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
   };
 
   const handleEditCarregamento = (carregamento: Carregamento) => {
+    const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
+    if (talhao && !talhao.ativo) {
+      setMessage(`Erro: O talhão ${talhao.NOME} está inativo e não pode ser editado.`);
+      return;
+    }
+
     const dataFormatada = new Date(carregamento.data).toISOString().split('T')[0];
     setCarregamentoFormData({
       id: carregamento.id,
@@ -483,10 +594,12 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     setCarregamentoFormData({ ...carregamentoFormData!, talhao_id: talhaoId });
     const selectedTalhao = talhoes.find((t) => t.id === talhaoId);
     if (selectedTalhao) {
-      if (selectedTalhao.qtde_plantas === undefined || selectedTalhao.qtde_plantas === null) {
-        setTalhaoWarning('Atenção: Este talhão não tem a quantidade de plantas preenchida.');
+      if (!selectedTalhao.ativo) {
+        setTalhaoWarning(`Atenção: O talhão ${selectedTalhao.NOME} está inativo e não pode ser usado.`);
+      } else if (selectedTalhao.qtde_plantas === undefined || selectedTalhao.qtde_plantas === null) {
+        setTalhaoWarning(`Atenção: O talhão ${selectedTalhao.NOME} não tem a quantidade de plantas preenchida.`);
       } else if (!selectedTalhao.VARIEDADE) {
-        setTalhaoWarning('Atenção: Este talhão não tem a variedade preenchida.');
+        setTalhaoWarning(`Atenção: O talhão ${selectedTalhao.NOME} não tem a variedade preenchida.`);
       } else {
         setTalhaoWarning('');
       }
@@ -498,6 +611,11 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     if (proporcao >= 67) return 'green';
     if (proporcao >= 34) return 'yellow';
     return 'red';
+  };
+
+  const getTextColorForProgressBar = (backgroundColor: string) => {
+    // Para barras verdes e azuis, o texto será branco; para amarelas e vermelhas, será preto
+    return backgroundColor === 'green' || backgroundColor === 'blue' ? '#fff' : '#000';
   };
 
   const handlePrevisaoChange = (talhaoId: string, field: 'safraId' | 'qtdeCaixasPrevPe', value: string | number) => {
@@ -544,39 +662,302 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     }
   };
 
+  // Função para baixar o modelo de Excel
+  const downloadExcelTemplate = () => {
+    const templateData = [
+      {
+        'Data (DD/MM/AAAA)': '01/05/2025',
+        'Talhao Nome': '1A',
+        'Motorista': 'João Silva',
+        'Placa': 'ABC1234',
+        'Quantidade de Caixas': 500,
+        'Safra ID': safraId || 'Insira o ID da safra',
+      },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Carregamentos');
+    XLSX.writeFile(wb, 'modelo_carregamentos.xlsx');
+  };
+
+  // Função para cadastrar um motorista ou retornar um existente
+  const cadastrarMotorista = async (nome: string): Promise<Motorista> => {
+    try {
+      const motoristaNome = nome.toUpperCase();
+      const response = await fetch(`${BASE_URL}/motoristas?search=${motoristaNome}`);
+      if (!response.ok) {
+        throw new Error(`Erro ao buscar motorista ${motoristaNome}: ${response.status} ${response.statusText}`);
+      }
+
+      const motoristas: Motorista[] = await response.json();
+      const motoristaExistente = motoristas.find((m) => m.nome === motoristaNome);
+
+      if (motoristaExistente) {
+        console.log(`Motorista ${motoristaNome} já existe, usando registro existente:`, motoristaExistente);
+        return motoristaExistente;
+      }
+
+      const createResponse = await fetch(`${BASE_URL}/motoristas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome: motoristaNome }),
+      });
+
+      if (!createResponse.ok) {
+        let errorData;
+        try {
+          errorData = await createResponse.json();
+        } catch (parseError) {
+          throw new Error(`Erro ao cadastrar motorista ${motoristaNome}: Resposta do servidor não é JSON válido - ${createResponse.status} ${createResponse.statusText}`);
+        }
+        throw new Error(errorData.error || `Erro ao cadastrar motorista - ${createResponse.status} ${createResponse.statusText}`);
+      }
+
+      const motorista: Motorista = await createResponse.json();
+      return motorista;
+    } catch (error) {
+      throw new Error(`Erro ao cadastrar motorista ${nome}: ` + (error instanceof Error ? error.message : 'Desconhecido'));
+    }
+  };
+
+  // Função para cadastrar ou atualizar um talhão
+  const cadastrarTalhao = async (nome: string): Promise<Talhao> => {
+    try {
+      // Verificar se o talhão já existe
+      const existingTalhao = talhoes.find((t) => t.NOME === nome);
+      if (existingTalhao) {
+        if (!existingTalhao.ativo) {
+          // Atualizar o talhão para ativo
+          const updatedTalhao = { ...existingTalhao, ativo: true };
+          const response = await fetch(`${BASE_URL}/talhoes/${existingTalhao.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedTalhao),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Erro ao atualizar talhão ${nome} para ativo`);
+          }
+
+          console.log(`Talhão "${nome}" (ID: ${existingTalhao.id}) atualizado para ativo`);
+          await fetchTalhoesData(); // Atualizar a lista de talhões
+          return updatedTalhao;
+        }
+        return existingTalhao;
+      }
+
+      // Criar um novo talhão como ativo
+      const talhaoData = {
+        TalhaoID: null,
+        TIPO: 'TALHAO',
+        NOME: nome,
+        AREA: '0 ha',
+        VARIEDADE: '',
+        PORTAENXERTO: '',
+        DATA_DE_PLANTIO: '',
+        IDADE: 0,
+        PRODUCAO_CAIXA: 0,
+        PRODUCAO_HECTARE: 0,
+        COR: '#00FF00',
+        qtde_plantas: 0,
+        ativo: true, // Criar como ativo por padrão
+      };
+
+      const response = await fetch(`${BASE_URL}/talhoes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(talhaoData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao cadastrar talhão');
+      }
+
+      const talhao: Talhao = await response.json();
+      console.log(`Talhão "${nome}" criado com ID ${talhao.id}`);
+      return talhao;
+    } catch (error) {
+      throw new Error(`Erro ao cadastrar talhão ${nome}: ` + (error instanceof Error ? error.message : 'Desconhecido'));
+    }
+  };
+
+  // Função para parsear data no formato DD/MM/AAAA ou número serial do Excel
+  const parseBrazilianDate = (dateInput: string | number): number => {
+    if (typeof dateInput === 'number') {
+      const excelEpoch = new Date(1900, 0, 1);
+      const date = new Date(excelEpoch.getTime() + (dateInput - 1) * 24 * 60 * 60 * 1000);
+      if (dateInput < 60) {
+        date.setDate(date.getDate() - 1);
+      }
+      if (isNaN(date.getTime())) {
+        throw new Error(`Data inválida: ${dateInput}. Não foi possível converter o número de dias.`);
+      }
+      return date.getTime();
+    }
+
+    const [day, month, year] = dateInput.split('/').map(Number);
+    const date = new Date(year, month - 1, day);
+    if (isNaN(date.getTime())) {
+      throw new Error(`Data inválida: ${dateInput}. Use o formato DD/MM/AAAA.`);
+    }
+    return date.getTime();
+  };
+
+  // Função para importar carregamentos a partir de um arquivo Excel
+  const handleImportCarregamentos = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+      const carregamentosToImport: any[] = [];
+      for (const row of jsonData) {
+        const data = parseBrazilianDate(row['Data (DD/MM/AAAA)']);
+        const talhaoNome = String(row['Talhao Nome']).trim();
+        if (!talhaoNome) {
+          throw new Error('Nome do talhão não pode estar vazio na linha do Excel.');
+        }
+
+        let talhao = talhoes.find((t) => t.NOME === talhaoNome);
+        if (!talhao) {
+          talhao = await cadastrarTalhao(talhaoNome);
+          setTalhoes((prev) => [...prev, talhao!]);
+        }
+
+        if (!talhao.ativo) {
+          throw new Error(`Talhão ${talhao.NOME} está inativo e não pode ser usado para carregamentos.`);
+        }
+
+        if (talhao.qtde_plantas === undefined || talhao.qtde_plantas === null) {
+          throw new Error(`Talhão ${talhao.NOME} não tem a quantidade de plantas preenchida.`);
+        }
+
+        if (!talhao.VARIEDADE) {
+          throw new Error(`Talhão ${talhao.NOME} não tem a variedade preenchida.`);
+        }
+
+        const motoristaNome = String(row['Motorista']).toUpperCase();
+        let motorista = motoristas.find((m) => m.nome === motoristaNome);
+        if (!motorista) {
+          motorista = await cadastrarMotorista(motoristaNome);
+          setMotoristas((prev) => [...prev, motorista!]);
+        }
+
+        const carregamento = {
+          data,
+          talhao_id: talhao.id,
+          motorista: motoristaNome,
+          placa: String(row['Placa']),
+          qte_caixa: Number(row['Quantidade de Caixas']),
+          safra_id: safraId!,
+        };
+
+        carregamentosToImport.push(carregamento);
+      }
+
+      for (const carregamento of carregamentosToImport) {
+        const response = await fetch(`${BASE_URL}/carregamentos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(carregamento),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Erro ao importar carregamento');
+        }
+      }
+
+      await fetchCarregamentosData();
+      setMessage(`Foram importados ${carregamentosToImport.length} carregamentos com sucesso!`);
+    } catch (error) {
+      setMessage('Erro ao importar carregamentos: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Função para exportar carregamentos em Excel
+  const exportToExcel = () => {
+    const exportData = carregamentos.map((carregamento) => {
+      const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
+      return {
+        'Data': carregamento.data ? new Date(carregamento.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Não definida',
+        'Talhao': talhao ? talhao.NOME : 'Desconhecido',
+        'Ativo': talhao ? (talhao.ativo ? 'Sim' : 'Não') : '-',
+        'Quantidade Plantas': carregamento.qtde_plantas || '-',
+        'Variedade': carregamento.variedade || '-',
+        'Motorista': carregamento.motorista,
+        'Placa': carregamento.placa,
+        'Quantidade de Caixas': formatNumber(carregamento.qte_caixa),
+        'Total': formatNumber(carregamento.total),
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Carregamentos');
+    XLSX.writeFile(wb, 'carregamentos_exportados.xlsx');
+  };
+
+  // Função para exportar carregamentos em PDF
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    const tableColumn = ['Data', 'Talhão', 'Ativo', 'Qtde Plantas', 'Variedade', 'Motorista', 'Placa', 'Qte de Caixa', 'Total'];
+    const tableRows: any[] = [];
+
+    carregamentos.forEach((carregamento) => {
+      const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
+      const rowData = [
+        carregamento.data ? new Date(carregamento.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Não definida',
+        talhao ? talhao.NOME : 'Desconhecido',
+        talhao ? (talhao.ativo ? 'Sim' : 'Não') : '-',
+        carregamento.qtde_plantas || '-',
+        carregamento.variedade || '-',
+        carregamento.motorista,
+        carregamento.placa,
+        formatNumber(carregamento.qte_caixa),
+        formatNumber(carregamento.total),
+      ];
+      tableRows.push(rowData);
+    });
+
+    (doc as any).autoTable({
+      head: [tableColumn],
+      body: tableRows,
+      theme: 'striped',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [46, 125, 50] },
+    });
+
+    doc.save('carregamentos_exportados.pdf');
+  };
+
   return (
-    <div style={{
-      padding: '20px',
-      fontFamily: 'Arial, sans-serif',
-      maxWidth: '1400px',
-      margin: '0 auto',
-    }}>
-      <h2 style={{
-        fontSize: '24px',
-        color: '#333',
-        marginBottom: '20px',
-      }}>Colheita</h2>
-      <div style={{
-        display: 'flex',
-        borderBottom: '1px solid #ddd',
-        marginBottom: '20px',
-      }}>
-        {['carregamentos', 'dinamica', 'prevRealizado', 'previsao', 'parametros'].map((tab) => (
+    <div className="page">
+      <div className="header-section">
+        <h2>Colheita</h2>
+      </div>
+      <div className="tabs">
+        {['dashboard', 'carregamentos', 'dinamica', 'prevRealizado', 'previsao', 'parametros'].map((tab) => (
           <div
             key={tab}
-            style={{
-              padding: '10px 20px',
-              cursor: 'pointer',
-              borderBottom: activeSubTab === tab ? '2px solid #2196F3' : 'none',
-              color: activeSubTab === tab ? '#2196F3' : '#666',
-              fontWeight: activeSubTab === tab ? 'bold' : 'normal',
-              transition: 'all 0.3s',
-            }}
+            className={`tab ${activeSubTab === tab ? 'active' : ''}`}
             onClick={() => setActiveSubTab(tab)}
           >
-            {tab === 'carregamentos' ? 'Carregamentos' :
+            {tab === 'dashboard' ? 'Dashboard' :
+             tab === 'carregamentos' ? 'Carregamentos' :
              tab === 'dinamica' ? 'Dinâmica' :
-             tab === 'prevRealizado' ? 'PREV-REALIZADO' :
+             tab === 'prevRealizado' ? 'Resumo' :
              tab === 'previsao' ? 'Previsão' :
              'Parâmetros'}
           </div>
@@ -584,147 +965,107 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
       </div>
 
       {message && (
-        <p style={{
-          padding: '10px',
-          backgroundColor: message.includes('Erro') ? '#f8d7da' : '#d4edda',
-          color: message.includes('Erro') ? '#721c24' : '#155724',
-          border: `1px solid ${message.includes('Erro') ? '#f5c6cb' : '#c3e6cb'}`,
-          borderRadius: '5px',
-          marginBottom: '20px',
-          textAlign: 'center',
-        }}>
+        <p className={`message ${message.includes('Erro') ? 'error' : 'success'}`}>
           {message}
         </p>
       )}
 
+      {activeSubTab === 'dashboard' && (
+        <div>
+          {safraId ? (
+            <ColheitaDashboard
+              dinamicaData={dinamicaData}
+              carregamentos={carregamentos}
+              talhoes={talhoes}
+              resumoGeral={resumoGeral}
+            />
+          ) : (
+            <p className="message">Selecione uma safra para visualizar o dashboard.</p>
+          )}
+        </div>
+      )}
+
       {activeSubTab === 'carregamentos' && (
         <div>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '20px',
-          }}>
-            <h3 style={{
-              fontSize: '20px',
-              color: '#333',
-              margin: 0,
-            }}>Carregamentos</h3>
+          <div className="header-section">
+            <h3>Carregamentos</h3>
             {safraId && (
-              <button
-                className="primary"
-                onClick={() => {
-                  setShowCarregamentoForm(true);
-                  setCarregamentoFormData({
-                    data: '',
-                    talhao_id: '',
-                    motorista: '',
-                    placa: '',
-                    qteCaixa: '',
-                  });
-                  setIsEditing(false);
-                }}
-                style={{
-                  padding: '10px 20px',
-                  backgroundColor: '#2196F3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '5px',
-                  cursor: 'pointer',
-                  fontSize: '16px',
-                  transition: 'background-color 0.3s',
-                }}
-                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1e88e5'}
-                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#2196F3'}
-              >
-                Adicionar Carregamento
-              </button>
+              <div className="button-group">
+                <button
+                  className="primary"
+                  onClick={() => {
+                    setShowCarregamentoForm(true);
+                    setCarregamentoFormData({
+                      data: '',
+                      talhao_id: '',
+                      motorista: '',
+                      placa: '',
+                      qteCaixa: '',
+                    });
+                    setIsEditing(false);
+                  }}
+                >
+                  Adicionar Carregamento
+                </button>
+                <button className="excel" onClick={downloadExcelTemplate}>
+                  Modelo Excel
+                </button>
+                <label className="import">
+                  <span>Importar</span>
+                  <input
+                    type="file"
+                    accept=".xlsx, .xls"
+                    onChange={handleImportCarregamentos}
+                    ref={fileInputRef}
+                  />
+                </label>
+                <div className="dropdown">
+                  <button
+                    className="dropdown-toggle"
+                    onClick={() => setShowExportMenu(!showExportMenu)}
+                  >
+                    Exportar
+                  </button>
+                  {showExportMenu && (
+                    <div className="dropdown-menu">
+                      <button onClick={() => { exportToExcel(); setShowExportMenu(false); }}>
+                        Excel
+                      </button>
+                      <button onClick={() => { exportToPDF(); setShowExportMenu(false); }}>
+                        PDF
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
           {safraId ? (
             <>
               {showCarregamentoForm && carregamentoFormData && (
-                <div style={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: '100%',
-                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  zIndex: 1000,
-                }}>
-                  <div style={{
-                    backgroundColor: 'white',
-                    padding: '20px',
-                    borderRadius: '10px',
-                    width: '400px',
-                    maxHeight: '80vh',
-                    overflowY: 'auto',
-                    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '20px',
-                    }}>
-                      <h3 style={{
-                        fontSize: '20px',
-                        color: '#333',
-                        margin: 0,
-                      }}>{isEditing ? 'Editar Carregamento' : 'Adicionar Carregamento'}</h3>
-                      <button style={{
-                        background: 'none',
-                        border: 'none',
-                        fontSize: '24px',
-                        cursor: 'pointer',
-                        color: '#666',
-                      }} onClick={handleCancelCarregamento}>×</button>
+                <div className="modal-overlay">
+                  <div className="modal">
+                    <div className="modal-header">
+                      <h3>{isEditing ? 'Editar Carregamento' : 'Adicionar Carregamento'}</h3>
+                      <button className="close-button" onClick={handleCancelCarregamento}>×</button>
                     </div>
                     <form onSubmit={handleAddCarregamento}>
-                      <div style={{ marginBottom: '15px' }}>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '12px',
-                          color: '#666',
-                          marginBottom: '5px',
-                        }}>Data</label>
+                      <div className="form-group">
+                        <label>Data</label>
                         <input
                           type="date"
                           value={carregamentoFormData.data}
                           onChange={(e) => setCarregamentoFormData({ ...carregamentoFormData, data: e.target.value })}
                           required
-                          style={{
-                            width: '100%',
-                            padding: '10px',
-                            border: '1px solid #ccc',
-                            borderRadius: '5px',
-                            fontSize: '16px',
-                          }}
                         />
                       </div>
-                      <div style={{ marginBottom: '15px' }}>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '12px',
-                          color: '#666',
-                          marginBottom: '5px',
-                        }}>Talhão</label>
+                      <div className="form-group">
+                        <label>Talhão</label>
                         <select
                           value={carregamentoFormData.talhao_id}
                           onChange={(e) => handleTalhaoChange(e.target.value)}
                           required
-                          style={{
-                            width: '100%',
-                            padding: '10px',
-                            border: '1px solid #ccc',
-                            borderRadius: '5px',
-                            fontSize: '16px',
-                          }}
                         >
                           <option value="">Selecione um Talhão</option>
                           {talhoes.map((talhao) => (
@@ -734,62 +1075,23 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
                           ))}
                         </select>
                         {talhaoWarning && (
-                          <p style={{
-                            color: 'red',
-                            fontSize: '12px',
-                            marginTop: '5px',
-                            marginBottom: 0,
-                          }}>{talhaoWarning}</p>
+                          <p className="warning-message">{talhaoWarning}</p>
                         )}
                       </div>
-                      <div style={{ marginBottom: '15px', position: 'relative' }}>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '12px',
-                          color: '#666',
-                          marginBottom: '5px',
-                        }}>Motorista</label>
+                      <div className="form-group" style={{ position: 'relative' }}>
+                        <label>Motorista</label>
                         <input
                           type="text"
                           value={motoristaInput}
                           onChange={(e) => handleMotoristaChange(e.target.value)}
                           required
-                          style={{
-                            width: '100%',
-                            padding: '10px',
-                            border: '1px solid #ccc',
-                            borderRadius: '5px',
-                            fontSize: '16px',
-                          }}
                         />
                         {motoristas.length > 0 && (
-                          <ul style={{
-                            position: 'absolute',
-                            top: '100%',
-                            left: 0,
-                            right: 0,
-                            zIndex: 1,
-                            backgroundColor: 'white',
-                            border: '1px solid #ccc',
-                            borderRadius: '5px',
-                            listStyle: 'none',
-                            padding: '5px 0',
-                            margin: '2px 0 0 0',
-                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-                          }}>
+                          <ul className="autocomplete-list">
                             {motoristas.map((motorista) => (
                               <li
                                 key={motorista.id}
                                 onClick={() => handleMotoristaSelect(motorista.nome)}
-                                style={{
-                                  padding: '8px 10px',
-                                  cursor: 'pointer',
-                                  fontSize: '14px',
-                                  color: '#333',
-                                  transition: 'background-color 0.3s',
-                                }}
-                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'white'}
                               >
                                 {motorista.nome}
                               </li>
@@ -797,33 +1099,16 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
                           </ul>
                         )}
                       </div>
-                      <div style={{ marginBottom: '15px' }}>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '12px',
-                          color: '#666',
-                          marginBottom: '5px',
-                        }}>Placa</label>
+                      <div className="form-group">
+                        <label>Placa</label>
                         <input
                           type="text"
                           value={carregamentoFormData.placa}
                           onChange={(e) => setCarregamentoFormData({ ...carregamentoFormData, placa: e.target.value })}
-                          style={{
-                            width: '100%',
-                            padding: '10px',
-                            border: '1px solid #ccc',
-                            borderRadius: '5px',
-                            fontSize: '16px',
-                          }}
                         />
                       </div>
-                      <div style={{ marginBottom: '15px' }}>
-                        <label style={{
-                          display: 'block',
-                          fontSize: '12px',
-                          color: '#666',
-                          marginBottom: '5px',
-                        }}>Quantidade de Caixa</label>
+                      <div className="form-group">
+                        <label>Quantidade de Caixa</label>
                         <input
                           type="number"
                           value={carregamentoFormData.qteCaixa}
@@ -846,57 +1131,20 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
                           required
                           step="0.01"
                           min="0"
-                          style={{
-                            width: '100%',
-                            padding: '10px',
-                            border: '1px solid #ccc',
-                            borderRadius: '5px',
-                            fontSize: '16px',
-                          }}
                         />
                       </div>
-                      <div style={{
-                        display: 'flex',
-                        justifyContent: 'flex-end',
-                        gap: '10px',
-                      }}>
+                      <div className="modal-footer">
                         <button
                           type="submit"
+                          className="primary"
                           disabled={!!talhaoWarning}
-                          style={{
-                            padding: '10px 20px',
-                            backgroundColor: !!talhaoWarning ? '#ccc' : '#4CAF50',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            cursor: !!talhaoWarning ? 'not-allowed' : 'pointer',
-                            fontSize: '16px',
-                            transition: 'background-color 0.3s',
-                          }}
-                          onMouseOver={(e) => {
-                            if (!talhaoWarning) e.currentTarget.style.backgroundColor = '#45a049';
-                          }}
-                          onMouseOut={(e) => {
-                            if (!talhaoWarning) e.currentTarget.style.backgroundColor = '#4CAF50';
-                          }}
                         >
                           {isEditing ? 'Salvar' : 'Adicionar'}
                         </button>
                         <button
                           type="button"
+                          className="danger"
                           onClick={handleCancelCarregamento}
-                          style={{
-                            padding: '10px 20px',
-                            backgroundColor: '#f44336',
-                            color: 'white',
-                            border: 'none',
-                            borderRadius: '5px',
-                            cursor: 'pointer',
-                            fontSize: '16px',
-                            transition: 'background-color 0.3s',
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#da190b'}
-                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f44336'}
                         >
                           Cancelar
                         </button>
@@ -905,509 +1153,275 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
                   </div>
                 </div>
               )}
-              <div style={{
-                overflowX: 'auto',
-                borderRadius: '10px',
-                boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-              }}>
-                <table style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  backgroundColor: 'white',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                }}>
-                  <thead>
-                    <tr>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Data</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Talhão</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Qtde Plantas</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Variedade</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Motorista</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Placa</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Qte de Caixa</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Total</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {carregamentos.map((carregamento) => {
-                      const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
-                      console.log(`Carregamento talhao_id: ${carregamento.talhao_id}, Talhão encontrado:`, talhao);
-                      return (
-                        <tr key={carregamento.id} style={{
-                          backgroundColor: carregamentos.indexOf(carregamento) % 2 === 0 ? '#fafafa' : 'white',
-                          transition: 'background-color 0.3s',
-                        }}
-                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = carregamentos.indexOf(carregamento) % 2 === 0 ? '#fafafa' : 'white'}
-                        >
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.data ? new Date(carregamento.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Não definida'}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {talhao ? talhao.NOME : 'Desconhecido'}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.qtde_plantas || '-'}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.variedade || '-'}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.motorista}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.placa}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.qte_caixa.toFixed(2)}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            {carregamento.total.toFixed(2)}
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd', display: 'flex', gap: '10px' }}>
-                            <div style={{ position: 'relative' }}>
-                              <button
-                                title="Editar"
-                                style={{
-                                  padding: '8px',
-                                  backgroundColor: '#2196F3',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '5px',
-                                  cursor: 'pointer',
-                                  fontSize: '16px',
-                                  transition: 'background-color 0.3s',
-                                  width: '40px',
-                                  height: '40px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                }}
-                                onClick={() => handleEditCarregamento(carregamento)}
-                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1e88e5'}
-                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#2196F3'}
-                              >
-                                ✏️
-                              </button>
-                            </div>
-                            <div style={{ position: 'relative' }}>
-                              <button
-                                title="Excluir"
-                                style={{
-                                  padding: '8px',
-                                  backgroundColor: '#f44336',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '5px',
-                                  cursor: 'pointer',
-                                  fontSize: '16px',
-                                  transition: 'background-color 0.3s',
-                                  width: '40px',
-                                  height: '40px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                }}
-                                onClick={() => handleDeleteCarregamento(carregamento.id)}
-                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#da190b'}
-                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f44336'}
-                              >
-                                🗑️
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Talhão</th>
+                    <th>Ativo</th>
+                    <th>Qtde Plantas</th>
+                    <th>Variedade</th>
+                    <th>Motorista</th>
+                    <th>Placa</th>
+                    <th>Qte de Caixa</th>
+                    <th>Total</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {carregamentos.map((carregamento) => {
+                    const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
+                    console.log(`Carregamento talhao_id: ${carregamento.talhao_id}, Talhão encontrado:`, talhao);
+                    return (
+                      <tr key={carregamento.id}>
+                        <td>{carregamento.data ? new Date(carregamento.data).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Não definida'}</td>
+                        <td>{talhao ? talhao.NOME : 'Desconhecido'}</td>
+                        <td>{talhao ? (talhao.ativo ? 'Sim' : 'Não') : '-'}</td>
+                        <td>{carregamento.qtde_plantas ? formatNumber(carregamento.qtde_plantas, 0) : '-'}</td>
+                        <td>{carregamento.variedade || '-'}</td>
+                        <td>{carregamento.motorista}</td>
+                        <td>{carregamento.placa}</td>
+                        <td>{formatNumber(carregamento.qte_caixa)}</td>
+                        <td>{formatNumber(carregamento.total)}</td>
+                        <td style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center' }}>
+                          <button
+                            className="primary icon-button"
+                            title="Editar"
+                            onClick={() => handleEditCarregamento(carregamento)}
+                            style={{
+                              padding: '8px',
+                              backgroundColor: '#2196F3',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '5px',
+                              cursor: 'pointer',
+                              fontSize: '16px',
+                              width: '40px',
+                              height: '40px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'background-color 0.3s',
+                            }}
+                            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1e88e5'}
+                            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#2196F3'}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            className="danger icon-button"
+                            title="Excluir"
+                            onClick={() => handleDeleteCarregamento(carregamento.id)}
+                            style={{
+                              padding: '8px',
+                              backgroundColor: '#f44336',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '5px',
+                              cursor: 'pointer',
+                              fontSize: '16px',
+                              width: '40px',
+                              height: '40px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'background-color 0.3s',
+                            }}
+                            onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#da190b'}
+                            onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f44336'}
+                          >
+                            🗑️
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </>
           ) : (
-            <p style={{
-              fontSize: '16px',
-              color: '#666',
-              textAlign: 'center',
-              marginTop: '20px',
-            }}>Selecione uma safra para visualizar os carregamentos.</p>
+            <p className="message">Selecione uma safra para visualizar os carregamentos.</p>
           )}
         </div>
       )}
 
       {activeSubTab === 'dinamica' && (
         <div>
-          <h3 style={{
-            fontSize: '20px',
-            color: '#333',
-            marginBottom: '20px',
-          }}>Dinâmica</h3>
+          <div className="header-section">
+            <h3>Dinâmica</h3>
+          </div>
           {safraId ? (
-            <div style={{
-              overflowX: 'auto',
-              borderRadius: '10px',
-              boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-            }}>
-              <table style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                backgroundColor: 'white',
-                borderRadius: '10px',
-                overflow: 'hidden',
-              }}>
+            <>
+              <table>
                 <thead>
                   <tr>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Talhão</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Variedade</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Total de Caixas</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Média de Caixas por Planta</th>
+                    <th>
+                      Talhão
+                      <input
+                        type="text"
+                        placeholder="Filtrar..."
+                        value={dinamicaFilters.talhaoNome}
+                        onChange={(e) => setDinamicaFilters({ ...dinamicaFilters, talhaoNome: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '5px',
+                          marginTop: '5px',
+                          boxSizing: 'border-box',
+                          fontSize: '14px',
+                          border: '1px solid #ccc',
+                          borderRadius: '4px',
+                        }}
+                      />
+                    </th>
+                    <th>
+                      Variedade
+                      <input
+                        type="text"
+                        placeholder="Filtrar..."
+                        value={dinamicaFilters.variedade}
+                        onChange={(e) => setDinamicaFilters({ ...dinamicaFilters, variedade: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '5px',
+                          marginTop: '5px',
+                          boxSizing: 'border-box',
+                          fontSize: '14px',
+                          border: '1px solid #ccc',
+                          borderRadius: '4px',
+                        }}
+                      />
+                    </th>
+                    <th>
+                      Total de Caixas
+                      <input
+                        type="number"
+                        placeholder="Min..."
+                        value={dinamicaFilters.totalCaixas}
+                        onChange={(e) => setDinamicaFilters({ ...dinamicaFilters, totalCaixas: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '5px',
+                          marginTop: '5px',
+                          boxSizing: 'border-box',
+                          fontSize: '14px',
+                          border: '1px solid #ccc',
+                          borderRadius: '4px',
+                        }}
+                      />
+                    </th>
+                    <th>
+                      Média de Caixas por Planta
+                      <input
+                        type="number"
+                        placeholder="Min..."
+                        value={dinamicaFilters.mediaCaixasPorPlanta}
+                        onChange={(e) => setDinamicaFilters({ ...dinamicaFilters, mediaCaixasPorPlanta: e.target.value })}
+                        style={{
+                          width: '100%',
+                          padding: '5px',
+                          marginTop: '5px',
+                          boxSizing: 'border-box',
+                          fontSize: '14px',
+                          border: '1px solid #ccc',
+                          borderRadius: '4px',
+                        }}
+                      />
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {dinamicaData.map((item, index) => (
-                    <tr key={index} style={{
-                      backgroundColor: index % 2 === 0 ? '#fafafa' : 'white',
-                      transition: 'background-color 0.3s',
-                    }}
-                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fafafa' : 'white'}
-                    >
-                      <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.talhaoNome}</td>
-                      <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.variedade}</td>
-                      <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.totalCaixas.toFixed(2)}</td>
-                      <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.mediaCaixasPorPlanta.toFixed(2)}</td>
+                  {filterDinamicaData(dinamicaData).map((item) => (
+                    <tr key={`${item.talhaoId}-${item.variedade}`}>
+                      <td>{item.talhaoNome}</td>
+                      <td>{item.variedade}</td>
+                      <td>{formatNumber(item.totalCaixas)}</td>
+                      <td>{formatNumber(item.mediaCaixasPorPlanta)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+              {filterDinamicaData(dinamicaData).length === 0 && (
+                <p style={{ textAlign: 'center', color: '#666', marginTop: '10px' }}>
+                  Nenhum dado encontrado para os filtros aplicados.
+                </p>
+              )}
+            </>
           ) : (
-            <p style={{
-              fontSize: '16px',
-              color: '#666',
-              textAlign: 'center',
-              marginTop: '20px',
-            }}>Selecione uma safra para visualizar a dinâmica.</p>
+            <p className="message">Selecione uma safra para visualizar a dinâmica.</p>
           )}
         </div>
       )}
 
       {activeSubTab === 'prevRealizado' && (
         <div>
-          <h3 style={{
-            fontSize: '20px',
-            color: '#333',
-            marginBottom: '20px',
-          }}>PREV-REALIZADO</h3>
+          <div className="header-section">
+            <h3>Resumo</h3>
+          </div>
           {safraId ? (
             <div style={{ display: 'flex', gap: '20px' }}>
               <div style={{ flex: 1 }}>
-                <h4 style={{
-                  fontSize: '18px',
-                  color: '#333',
-                  marginBottom: '10px',
-                }}>Resumo por Talhão</h4>
-                <div style={{
-                  overflowX: 'auto',
-                  borderRadius: '10px',
-                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-                }}>
-                  <table style={{
-                    width: '100%',
-                    borderCollapse: 'collapse',
-                    backgroundColor: 'white',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                  }}>
+                <h4>Resumo por Talhão</h4>
+                {enrichedPrevRealizado.length > 0 ? (
+                  <table>
                     <thead>
                       <tr>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Talhão</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Variedade</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Qtde Plantas</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Cx/Pé Prev</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Cx/Pé Realizado</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Total Cx Prev</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Total Cx Realizado</th>
+                        <th>Talhão</th>
+                        <th>Variedade</th>
+                        <th>Qtde Plantas</th>
+                        <th>Cx/Pé Prev</th>
+                        <th>Cx/Pé Realizado</th>
+                        <th>Total Cx Prev</th>
+                        <th>Total Cx Realizado</th>
                       </tr>
                     </thead>
                     <tbody>
                       {enrichedPrevRealizado.map((item) => (
-                        <tr key={item.id} style={{
-                          backgroundColor: enrichedPrevRealizado.indexOf(item) % 2 === 0 ? '#fafafa' : 'white',
-                          transition: 'background-color 0.3s',
-                        }}
-                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = enrichedPrevRealizado.indexOf(item) % 2 === 0 ? '#fafafa' : 'white'}
-                        >
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.talhao}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.variedade}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.qtde_plantas}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.cx_pe_prev.toFixed(2)}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.cx_pe_realizado.toFixed(2)}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.total_cx_prev.toFixed(2)}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{item.total_cx_realizado.toFixed(2)}</td>
+                        <tr key={item.id}>
+                          <td>{item.talhao}</td>
+                          <td>{item.variedade}</td>
+                          <td>{formatNumber(item.qtde_plantas, 0)}</td>
+                          <td>{formatNumber(item.cx_pe_prev)}</td>
+                          <td>{formatNumber(item.cx_pe_realizado)}</td>
+                          <td>{formatNumber(item.total_cx_prev)}</td>
+                          <td>{formatNumber(item.total_cx_realizado)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                </div>
+                ) : (
+                  <p style={{ textAlign: 'center', color: '#666', marginTop: '10px' }}>
+                    Nenhum dado disponível para o Resumo por Talhão.
+                  </p>
+                )}
               </div>
 
               <div style={{ flex: 1 }}>
-                <h4 style={{
-                  fontSize: '18px',
-                  color: '#333',
-                  marginBottom: '10px',
-                }}>Resumo Geral</h4>
-                <div style={{
-                  overflowX: 'auto',
-                  borderRadius: '10px',
-                  boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-                }}>
-                  <table style={{
-                    width: '100%',
-                    borderCollapse: 'collapse',
-                    backgroundColor: 'white',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                  }}>
+                <h4>Resumo Geral</h4>
+                {Object.keys(resumoGeral.data).length > 0 ? (
+                  <table>
                     <thead>
                       <tr>
-                        <th colSpan={2} style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'center',
-                          borderBottom: '1px solid #ddd',
-                        }}>PREV</th>
-                        <th colSpan={2} style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'center',
-                          borderBottom: '1px solid #ddd',
-                        }}>REALIZADO</th>
+                        <th colSpan={2}>PREVISÃO</th>
+                        <th colSpan={2}>REALIZADO</th>
                       </tr>
                       <tr>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Variedade</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Total Previsto</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>Total Realizado</th>
-                        <th style={{
-                          padding: '15px',
-                          backgroundColor: '#f4f4f4',
-                          color: '#333',
-                          fontWeight: 'bold',
-                          fontSize: '14px',
-                          textAlign: 'left',
-                          borderBottom: '1px solid #ddd',
-                        }}>% Realizada</th>
+                        <th>Variedade</th>
+                        <th>Total Previsto</th>
+                        <th>Total Realizado</th>
+                        <th>% Realizada</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(resumoGeral).map(([variedade, data]) => {
+                      {Object.entries(resumoGeral.data).map(([variedade, data]) => {
                         const proporcao = data.proporcao;
                         const progressColor = getProgressColor(proporcao);
+                        const textColor = getTextColorForProgressBar(progressColor);
                         return (
-                          <tr key={variedade} style={{
-                            backgroundColor: Object.keys(resumoGeral).indexOf(variedade) % 2 === 0 ? '#fafafa' : 'white',
-                            transition: 'background-color 0.3s',
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = Object.keys(resumoGeral).indexOf(variedade) % 2 === 0 ? '#fafafa' : 'white'}
-                          >
-                            <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{variedade}</td>
-                            <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{data.previsto.toFixed(2)}</td>
-                            <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{data.realizado.toFixed(2)}</td>
-                            <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
+                          <tr key={variedade}>
+                            <td>{variedade}</td>
+                            <td>{formatNumber(data.previsto)}</td>
+                            <td>{formatNumber(data.realizado)}</td>
+                            <td>
                               <div style={{ position: 'relative', width: '100px' }}>
                                 <div
                                   style={{
@@ -1416,366 +1430,174 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
                                     width: `${Math.min(proporcao, 100)}%`,
                                     borderRadius: '4px',
                                   }}
-                                />
-                                <span
-                                  style={{
-                                    position: 'absolute',
-                                    top: '-20px',
-                                    left: '50%',
-                                    transform: 'translateX(-50%)',
-                                    fontSize: '12px',
-                                    color: '#333',
-                                  }}
                                 >
-                                  {proporcao.toFixed(1)}%
-                                </span>
+                                  <span
+                                    style={{
+                                      position: 'absolute',
+                                      top: '50%',
+                                      left: '50%',
+                                      transform: 'translate(-50%, -50%)',
+                                      fontSize: '12px',
+                                      color: textColor,
+                                    }}
+                                  >
+                                    {proporcao.toFixed(1)}%
+                                  </span>
+                                </div>
                               </div>
                             </td>
                           </tr>
                         );
                       })}
+                      <tr style={{ fontWeight: 'bold', borderTop: '2px solid #ccc' }}>
+                        <td>Total</td>
+                        <td>{formatNumber(resumoGeral.totalPrevisto)}</td>
+                        <td>{formatNumber(resumoGeral.totalRealizado)}</td>
+                        <td></td>
+                      </tr>
                     </tbody>
                   </table>
-                </div>
+                ) : (
+                  <p style={{ textAlign: 'center', color: '#666', marginTop: '10px' }}>
+                    Nenhum dado disponível para o Resumo Geral.
+                  </p>
+                )}
               </div>
             </div>
           ) : (
-            <p style={{
-              fontSize: '16px',
-              color: '#666',
-              textAlign: 'center',
-              marginTop: '20px',
-            }}>Selecione uma safra para visualizar os dados PREV-REALIZADO.</p>
+            <p className="message">Selecione uma safra para visualizar os dados RESUMO.</p>
           )}
         </div>
       )}
 
       {activeSubTab === 'previsao' && (
         <div>
-          <h3 style={{
-            fontSize: '20px',
-            color: '#333',
-            marginBottom: '20px',
-          }}>Previsão</h3>
+          <div className="header-section">
+            <h3>Previsão</h3>
+          </div>
           {safraId ? (
-            <div style={{
-              overflowX: 'auto',
-              borderRadius: '10px',
-              boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-            }}>
-              <table style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                backgroundColor: 'white',
-                borderRadius: '10px',
-                overflow: 'hidden',
-              }}>
-                <thead>
-                  <tr>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Nome</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Variedade</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Data de Plantio</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Idade</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Qtde/Pés</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Safra</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Qtde Caixas Previstas/Pé</th>
-                    <th style={{
-                      padding: '15px',
-                      backgroundColor: '#f4f4f4',
-                      color: '#333',
-                      fontWeight: 'bold',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      borderBottom: '1px solid #ddd',
-                    }}>Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...talhoes]
-                    .sort((a, b) => {
-                      const parsedA = parseTalhaoName(a.NOME);
-                      const parsedB = parseTalhaoName(b.NOME);
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Variedade</th>
+                  <th>Data de Plantio</th>
+                  <th>Idade</th>
+                  <th>Qtde/Pés</th>
+                  <th>Safra</th>
+                  <th>Qtde Caixas Previstas/Pé</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...talhoes]
+                  .sort((a, b) => {
+                    const parsedA = parseTalhaoName(a.NOME);
+                    const parsedB = parseTalhaoName(b.NOME);
 
-                      if (parsedA.number !== parsedB.number) {
-                        return parsedA.number - parsedB.number;
-                      }
+                    if (parsedA.number !== parsedB.number) {
+                      return parsedA.number - parsedB.number;
+                    }
 
-                      return parsedA.suffix.localeCompare(parsedB.suffix);
-                    })
-                    .map((talhao) => {
-                      const previsao = previsoes.find((p) => p.talhao_id === talhao.id);
-                      const formData = previsaoFormData[talhao.id] || { safraId: safraId || '', qtdeCaixasPrevPe: previsao?.qtde_caixas_prev_pe || 0 };
+                    return parsedA.suffix.localeCompare(parsedB.suffix);
+                  })
+                  .map((talhao) => {
+                    const previsao = previsoes.find((p) => p.talhao_id === talhao.id);
+                    const formData = previsaoFormData[talhao.id] || { safraId: safraId || '', qtdeCaixasPrevPe: previsao?.qtde_caixas_prev_pe || 0 };
 
-                      return (
-                        <tr key={talhao.id} style={{
-                          backgroundColor: talhoes.indexOf(talhao) % 2 === 0 ? '#fafafa' : 'white',
-                          transition: 'background-color 0.3s',
-                        }}
-                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = talhoes.indexOf(talhao) % 2 === 0 ? '#fafafa' : 'white'}
-                        >
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.NOME}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.VARIEDADE || '-'}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.DATA_DE_PLANTIO || '-'}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.IDADE || 0}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.qtde_plantas || 0}</td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            <select
-                              value={formData.safraId}
-                              onChange={(e) => handlePrevisaoChange(talhao.id, 'safraId', e.target.value)}
-                              style={{
-                                padding: '8px',
-                                border: '1px solid #ccc',
-                                borderRadius: '5px',
-                                fontSize: '14px',
-                              }}
-                            >
-                              <option value="">Selecione uma Safra</option>
-                              {safras.map((safra) => (
-                                <option key={safra.id} value={safra.id}>
-                                  {safra.nome}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            <input
-                              type="number"
-                              value={formData.qtdeCaixasPrevPe}
-                              onChange={(e) => handlePrevisaoChange(talhao.id, 'qtdeCaixasPrevPe', e.target.value)}
-                              step="0.01"
-                              style={{
-                                width: '100px',
-                                padding: '8px',
-                                border: '1px solid #ccc',
-                                borderRadius: '5px',
-                                fontSize: '14px',
-                              }}
-                            />
-                          </td>
-                          <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                            <button
-                              style={{
-                                padding: '8px 15px',
-                                backgroundColor: '#2196F3',
-                                color: 'white',
-                                border: 'none',
-                                borderRadius: '5px',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                transition: 'background-color 0.3s',
-                              }}
-                              onClick={() => handleSavePrevisao(talhao.id)}
-                              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#1e88e5'}
-                              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#2196F3'}
-                            >
-                              Salvar
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
+                    return (
+                      <tr key={talhao.id}>
+                        <td>{talhao.NOME}</td>
+                        <td>{talhao.VARIEDADE || '-'}</td>
+                        <td>{talhao.DATA_DE_PLANTIO || '-'}</td>
+                        <td>{talhao.IDADE || 0}</td>
+                        <td>{talhao.qtde_plantas ? formatNumber(talhao.qtde_plantas, 0) : 0}</td>
+                        <td>
+                          <select
+                            value={formData.safraId}
+                            onChange={(e) => handlePrevisaoChange(talhao.id, 'safraId', e.target.value)}
+                          >
+                            <option value="">Selecione uma Safra</option>
+                            {safras.map((safra) => (
+                              <option key={safra.id} value={safra.id}>
+                                {safra.nome}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            value={formData.qtdeCaixasPrevPe}
+                            onChange={(e) => handlePrevisaoChange(talhao.id, 'qtdeCaixasPrevPe', e.target.value)}
+                            step="0.01"
+                            style={{ width: '100px' }}
+                          />
+                        </td>
+                        <td>
+                          <button
+                            className="primary"
+                            onClick={() => handleSavePrevisao(talhao.id)}
+                          >
+                            Salvar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
           ) : (
-            <p style={{
-              fontSize: '16px',
-              color: '#666',
-              textAlign: 'center',
-              marginTop: '20px',
-            }}>Selecione uma safra para visualizar as previsões.</p>
+            <p className="message">Selecione uma safra para visualizar as previsões.</p>
           )}
         </div>
       )}
 
       {activeSubTab === 'parametros' && (
         <div>
-          <h3 style={{
-            fontSize: '20px',
-            color: '#333',
-            marginBottom: '20px',
-          }}>Parâmetros</h3>
+          <div className="header-section">
+            <h3>Parâmetros</h3>
+          </div>
           {safraId ? (
             <>
-              <h4 style={{
-                fontSize: '18px',
-                color: '#333',
-                marginBottom: '10px',
-              }}>Semanas de Colheita</h4>
-              <div style={{
-                overflowX: 'auto',
-                borderRadius: '10px',
-                boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-                marginBottom: '20px',
-              }}>
-                <table style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  backgroundColor: 'white',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                }}>
-                  <thead>
-                    <tr>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Semana do Ano</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Semana de Colheita</th>
+              <h4>Semanas de Colheita</h4>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Semana do Ano</th>
+                    <th>Semana de Colheita</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {semanasColheita.map((semana) => (
+                    <tr key={semana.id}>
+                      <td>{semana.semana_ano}</td>
+                      <td>{semana.semana_colheita}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {semanasColheita.map((semana) => (
-                      <tr key={semana.id} style={{
-                        backgroundColor: semanasColheita.indexOf(semana) % 2 === 0 ? '#fafafa' : 'white',
-                        transition: 'background-color 0.3s',
-                      }}
-                      onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                      onMouseOut={(e) => e.currentTarget.style.backgroundColor = semanasColheita.indexOf(semana) % 2 === 0 ? '#fafafa' : 'white'}
-                      >
-                        <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{semana.semana_ano}</td>
-                        <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{semana.semana_colheita}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
 
-              <h4 style={{
-                fontSize: '18px',
-                color: '#333',
-                marginBottom: '10px',
-              }}>Data Inicial de Colheita</h4>
-              <div style={{
-                overflowX: 'auto',
-                borderRadius: '10px',
-                boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-              }}>
-                <table style={{
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  backgroundColor: 'white',
-                  borderRadius: '10px',
-                  overflow: 'hidden',
-                }}>
-                  <thead>
-                    <tr>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Nome</th>
-                      <th style={{
-                        padding: '15px',
-                        backgroundColor: '#f4f4f4',
-                        color: '#333',
-                        fontWeight: 'bold',
-                        fontSize: '14px',
-                        textAlign: 'left',
-                        borderBottom: '1px solid #ddd',
-                      }}>Data Inicial de Colheita</th>
+              <h4>Data Inicial de Colheita</h4>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Data Inicial de Colheita</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {safras.filter((safra) => safra.id === safraId).map((safra) => (
+                    <tr key={safra.id}>
+                      <td>{safra.nome}</td>
+                      <td>{safra.data_inicial_colheita ? new Date(safra.data_inicial_colheita).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Não definida'}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {safras.filter((safra) => safra.id === safraId).map((safra) => (
-                      <tr key={safra.id} style={{
-                        backgroundColor: safras.indexOf(safra) % 2 === 0 ? '#fafafa' : 'white',
-                        transition: 'background-color 0.3s',
-                      }}
-                      onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
-                      onMouseOut={(e) => e.currentTarget.style.backgroundColor = safras.indexOf(safra) % 2 === 0 ? '#fafafa' : 'white'}
-                      >
-                        <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{safra.nome}</td>
-                        <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                          {safra.data_inicial_colheita ? new Date(safra.data_inicial_colheita).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) : 'Não definida'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </>
           ) : (
-            <p style={{
-              fontSize: '16px',
-              color: '#666',
-              textAlign: 'center',
-              marginTop: '20px',
-            }}>Selecione uma safra para visualizar os parâmetros.</p>
+            <p className="message">Selecione uma safra para visualizar os parâmetros.</p>
           )}
         </div>
       )}

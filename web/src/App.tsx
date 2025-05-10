@@ -6,7 +6,7 @@ import { ConfigPage } from './components/ConfigPage';
 import { ColheitaPage } from './components/ColheitaPage';
 import './styles/main.scss';
 
-// Interface para Safra, definida localmente com base nos dados retornados pelo backend
+// Interface para Safra
 interface Safra {
   id: string;
   nome: string;
@@ -19,6 +19,9 @@ export default function App() {
   const [safras, setSafras] = useState<Safra[]>([]);
   const [selectedSafra, setSelectedSafra] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showNewSafraModal, setShowNewSafraModal] = useState<boolean>(false);
+  const [newSafraName, setNewSafraName] = useState<string>('');
+  const [newSafraDataInicial, setNewSafraDataInicial] = useState<string>('');
 
   const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
@@ -28,8 +31,9 @@ export default function App() {
       if (!response.ok) throw new Error('Erro ao buscar safras');
       const records = await response.json();
       setSafras(records);
-      const activeSafra = records.find((safra: Safra) => safra.is_active);
-      setSelectedSafra(activeSafra ? activeSafra.id : records.length > 0 ? records[0].id : null);
+      if (!selectedSafra && records.length > 0) {
+        setSelectedSafra(records[records.length - 1].id);
+      }
     } catch (error) {
       console.error('Erro ao carregar safras:', error);
       setError('Erro ao carregar safras. Tente recarregar a página.');
@@ -40,35 +44,51 @@ export default function App() {
     fetchSafras();
   }, []);
 
-  const handleSafraChange = async (safraId: string) => {
-    try {
-      // Atualizar o status is_active de todas as safras
-      const updatedSafras = safras.map((safra) => ({
-        ...safra,
-        is_active: safra.id === safraId,
-      }));
+  const handleSafraChange = (safraId: string) => {
+    setSelectedSafra(safraId);
+  };
 
-      // Enviar atualizações para o backend
-      await Promise.all(
-        updatedSafras.map(async (safra) => {
-          const response = await fetch(`${BASE_URL}/safras/${safra.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              nome: safra.nome,
-              is_active: safra.is_active,
-              data_inicial_colheita: safra.data_inicial_colheita,
-            }),
-          });
-          if (!response.ok) throw new Error(`Erro ao atualizar safra ${safra.id}`);
-        })
-      );
-
-      setSelectedSafra(safraId);
-      await fetchSafras(); // Atualiza a lista de safras após a mudança
-    } catch (error) {
-      setError('Erro ao atualizar safra: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+  const handleCreateSafra = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSafraName) {
+      setError('Por favor, informe o nome da safra.');
+      return;
     }
+
+    try {
+      const dataInicial = newSafraDataInicial ? new Date(newSafraDataInicial).getTime() : null;
+
+      const response = await fetch(`${BASE_URL}/safras`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: newSafraName,
+          is_active: true,
+          data_inicial_colheita: dataInicial,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao criar safra');
+      }
+
+      const newSafra = await response.json();
+
+      setNewSafraName('');
+      setNewSafraDataInicial('');
+      setShowNewSafraModal(false);
+      await fetchSafras();
+      setSelectedSafra(newSafra.id);
+    } catch (error) {
+      setError('Erro ao criar safra: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+    }
+  };
+
+  const handleCancelNewSafra = () => {
+    setNewSafraName('');
+    setNewSafraDataInicial('');
+    setShowNewSafraModal(false);
   };
 
   if (error) {
@@ -109,9 +129,8 @@ export default function App() {
           >
             Configurações
           </div>
-
         </div>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <label>Safra: </label>
           <select value={selectedSafra || ''} onChange={(e) => handleSafraChange(e.target.value)}>
             {safras.map((safra) => (
@@ -120,12 +139,66 @@ export default function App() {
               </option>
             ))}
           </select>
+          <button
+            className="primary"
+            onClick={() => setShowNewSafraModal(true)}
+            style={{
+              padding: '5px 10px',
+              backgroundColor: '#2196F3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Nova Safra
+          </button>
         </div>
       </div>
+
+      {showNewSafraModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Criar Nova Safra</h3>
+              <button className="close-button" onClick={handleCancelNewSafra}>×</button>
+            </div>
+            <form onSubmit={handleCreateSafra}>
+              <div className="form-group">
+                <label>Nome da Safra</label>
+                <input
+                  type="text"
+                  value={newSafraName}
+                  onChange={(e) => setNewSafraName(e.target.value)}
+                  placeholder="Ex.: Safra 2025"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Data Inicial de Colheita (opcional)</label>
+                <input
+                  type="date"
+                  value={newSafraDataInicial}
+                  onChange={(e) => setNewSafraDataInicial(e.target.value)}
+                />
+              </div>
+              <div className="modal-footer">
+                <button type="submit" className="primary">
+                  Criar
+                </button>
+                <button type="button" className="danger" onClick={handleCancelNewSafra}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       <div className="page">
         {activeTab === 'map' && <MapPage safraId={selectedSafra} />}
         {activeTab === 'colheita' && <ColheitaPage safraId={selectedSafra} />}
-        {activeTab === 'data' && <DataPage />}
+        {activeTab === 'data' && <DataPage safraId={selectedSafra} />}
         {activeTab === 'kml' && <KmlPage />}
         {activeTab === 'config' && <ConfigPage onSafraChange={fetchSafras} />}
       </div>

@@ -15,6 +15,7 @@ interface Talhao {
   PRODUCAO_HECTARE: number;
   COR: string;
   qtde_plantas?: number;
+  ativo: boolean;
 }
 
 interface TalhaoFormData {
@@ -30,6 +31,7 @@ interface TalhaoFormData {
   PRODUCAO_HECTARE: number;
   COR: string;
   QTDE_PLANTAS: number;
+  ativo: boolean;
 }
 
 interface ConfigOption {
@@ -38,7 +40,11 @@ interface ConfigOption {
   default_color: string;
 }
 
-export function DataPage() {
+interface DataPageProps {
+  safraId?: string | null;
+}
+
+export function DataPage({ safraId }: DataPageProps) {
   const [talhoes, setTalhoes] = useState<Talhao[]>([]);
   const [filteredTalhoes, setFilteredTalhoes] = useState<Talhao[]>([]);
   const [formData, setFormData] = useState<TalhaoFormData | null>(null);
@@ -48,7 +54,9 @@ export function DataPage() {
   const [variedadeOptions, setVariedadeOptions] = useState<ConfigOption[]>([]);
   const [filterText, setFilterText] = useState<string>('');
   const [filterType, setFilterType] = useState<string>('Todos');
+  const [filterStatus, setFilterStatus] = useState<string>('Ativos');
   const [sortConfig, setSortConfig] = useState<{ key: 'NOME' | 'TalhaoID'; direction: 'asc' | 'desc' | null }>({ key: 'NOME', direction: null });
+  const [producaoCaixas, setProducaoCaixas] = useState<{ [talhaoId: string]: number }>({});
 
   const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
@@ -117,6 +125,7 @@ export function DataPage() {
         DATA_DE_PLANTIO: t.DATA_DE_PLANTIO,
         IDADE: t.IDADE,
         qtde_plantas: t.qtde_plantas,
+        ativo: t.ativo,
       })));
       setTalhoes(updatedTalhoes);
     } catch (error) {
@@ -125,10 +134,33 @@ export function DataPage() {
     }
   };
 
+  const fetchProducaoCaixas = async () => {
+    if (!safraId) return;
+    const producao: { [talhaoId: string]: number } = {};
+    for (const talhao of talhoes) {
+      try {
+        const response = await fetch(`${BASE_URL}/talhoes/${talhao.id}/producao_caixa?safra_id=${safraId}`);
+        if (!response.ok) throw new Error(`Erro ao buscar produção de caixas para talhão ${talhao.id}`);
+        const data = await response.json();
+        producao[talhao.id] = data.totalCaixas;
+      } catch (error) {
+        console.error(`Erro ao buscar produção de caixas para talhão ${talhao.id}:`, error);
+        producao[talhao.id] = 0;
+      }
+    }
+    setProducaoCaixas(producao);
+  };
+
   useEffect(() => {
     fetchTalhoes();
     fetchConfigs();
   }, []);
+
+  useEffect(() => {
+    if (safraId && talhoes.length > 0) {
+      fetchProducaoCaixas();
+    }
+  }, [safraId, talhoes]);
 
   const parseTalhaoName = (nome: string): { number: number; suffix: string } => {
     const match = nome.match(/^(\d+)([A-Za-z]*)$/);
@@ -175,7 +207,11 @@ export function DataPage() {
       const nome = talhao.NOME.toLowerCase();
       const matchesText = talhaoId.includes(filterText.toLowerCase()) || nome.includes(filterText.toLowerCase());
       const matchesType = filterType === 'Todos' || talhao.TIPO === filterType;
-      return matchesText && matchesType;
+      const matchesStatus =
+        filterStatus === 'Todos' ||
+        (filterStatus === 'Ativos' && talhao.ativo) ||
+        (filterStatus === 'Inativos' && !talhao.ativo);
+      return matchesText && matchesType && matchesStatus;
     });
 
     let updatedTalhoes = filtered;
@@ -195,9 +231,13 @@ export function DataPage() {
     setFilterType(e.target.value);
   };
 
+  const handleFilterStatus = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setFilterStatus(e.target.value);
+  };
+
   useEffect(() => {
     applyFiltersAndSort();
-  }, [filterText, filterType, talhoes]);
+  }, [filterText, filterType, filterStatus, talhoes]);
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,6 +257,7 @@ export function DataPage() {
         PRODUCAO_HECTARE: formData.PRODUCAO_HECTARE,
         COR: formData.COR,
         qtde_plantas: formData.QTDE_PLANTAS,
+        ativo: formData.ativo,
       };
 
       if (editingId) {
@@ -225,20 +266,27 @@ export function DataPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(talhaoData),
         });
-        if (!response.ok) throw new Error('Erro ao atualizar talhão');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Erro ao atualizar talhão');
+        }
       } else {
         const response = await fetch(`${BASE_URL}/talhoes`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(talhaoData),
         });
-        if (!response.ok) throw new Error('Erro ao adicionar talhão');
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Erro ao adicionar talhão');
+        }
       }
 
       setFormData(null);
       setEditingId(null);
       setFilterText('');
       setFilterType('Todos');
+      setFilterStatus('Ativos');
       await fetchTalhoes();
       setMessage(editingId ? 'Talhão atualizado com sucesso!' : 'Talhão adicionado com sucesso!');
     } catch (error) {
@@ -260,6 +308,7 @@ export function DataPage() {
       PRODUCAO_HECTARE: talhao.PRODUCAO_HECTARE,
       COR: talhao.COR,
       QTDE_PLANTAS: talhao.qtde_plantas || 0,
+      ativo: talhao.ativo,
     };
     setFormData(newFormData);
     setEditingId(talhao.id);
@@ -272,6 +321,7 @@ export function DataPage() {
       if (!response.ok) throw new Error('Erro ao excluir talhão');
       setFilterText('');
       setFilterType('Todos');
+      setFilterStatus('Ativos');
       await fetchTalhoes();
       setMessage('Talhão excluído com sucesso!');
     } catch (error) {
@@ -369,6 +419,7 @@ export function DataPage() {
                 PRODUCAO_HECTARE: 0,
                 COR: tipoOptions[0]?.default_color || '#00FF00',
                 QTDE_PLANTAS: 0,
+                ativo: true,
               })}
               style={{
                 padding: '10px 20px',
@@ -456,7 +507,6 @@ export function DataPage() {
                   type="text"
                   value={formData.TalhaoID ?? ''}
                   onChange={(e) => setFormData({ ...formData, TalhaoID: e.target.value || null })}
-                  disabled={!!editingId}
                   style={{
                     width: '100%',
                     padding: '10px',
@@ -701,6 +751,28 @@ export function DataPage() {
                   }}
                 />
               </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Situação</label>
+                <select
+                  value={formData.ativo ? 'Ativo' : 'Inativo'}
+                  onChange={(e) => setFormData({ ...formData, ativo: e.target.value === 'Ativo' })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                >
+                  <option value="Ativo">Ativo</option>
+                  <option value="Inativo">Inativo</option>
+                </select>
+              </div>
               <div style={{
                 display: 'flex',
                 justifyContent: 'flex-end',
@@ -820,6 +892,32 @@ export function DataPage() {
             </option>
           ))}
         </select>
+        <select
+          value={filterStatus}
+          onChange={handleFilterStatus}
+          style={{
+            padding: '10px',
+            width: '200px',
+            border: '1px solid #ccc',
+            borderRadius: '25px',
+            fontSize: '16px',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+            outline: 'none',
+            transition: 'border-color 0.3s, box-shadow 0.3s',
+          }}
+          onFocus={(e) => {
+            e.target.style.borderColor = '#4CAF50';
+            e.target.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.2)';
+          }}
+          onBlur={(e) => {
+            e.target.style.borderColor = '#ccc';
+            e.target.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
+          }}
+        >
+          <option value="Ativos">Ativos</option>
+          <option value="Inativos">Inativos</option>
+          <option value="Todos">Todos</option>
+        </select>
       </div>
 
       <div style={{
@@ -841,11 +939,12 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
                 cursor: 'pointer',
                 transition: 'background-color 0.3s',
+                width: 'fit-content',
               }}
               onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#e0e0e0'}
               onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f4f4f4'}
@@ -859,7 +958,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
                 cursor: 'pointer',
@@ -877,7 +976,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Área</th>
@@ -886,7 +985,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Variedade</th>
@@ -895,7 +994,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Portaenxerto</th>
@@ -904,7 +1003,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Data de Plantio</th>
@@ -913,7 +1012,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Idade</th>
@@ -922,7 +1021,7 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Qtde Plantas</th>
@@ -931,25 +1030,25 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
-              }}>Produção Caixa</th>
+              }}>Produção Caixa (Safra)</th>
               <th style={{
                 padding: '15px',
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
-              }}>Produção Hectare</th>
+              }}>Produção Caixa/Hectare</th>
               <th style={{
                 padding: '15px',
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Cor</th>
@@ -958,7 +1057,16 @@ export function DataPage() {
                 backgroundColor: '#f4f4f4',
                 color: '#333',
                 fontWeight: 'bold',
-                fontSize: '14px',
+                fontSize: '12px',
+                textAlign: 'left',
+                borderBottom: '1px solid #ddd',
+              }}>Situação</th>
+              <th style={{
+                padding: '15px',
+                backgroundColor: '#f4f4f4',
+                color: '#333',
+                fontWeight: 'bold',
+                fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
               }}>Ações</th>
@@ -973,19 +1081,27 @@ export function DataPage() {
               onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
               onMouseOut={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fafafa' : 'white'}
               >
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.TalhaoID ?? 'N/A'}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.NOME}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.AREA}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.VARIEDADE}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.PORTAENXERTO}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.DATA_DE_PLANTIO}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.IDADE}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.qtde_plantas ?? 'N/A'}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.PRODUCAO_CAIXA}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{talhao.PRODUCAO_HECTARE}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
-                  <div style={{ backgroundColor: talhao.COR, width: '20px', height: '20px', display: 'inline-block', borderRadius: '3px', marginRight: '5px' }}></div>
-                  {talhao.COR}
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px', width: 'fit-content' }}>{talhao.TalhaoID ?? 'N/A'}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.NOME}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.AREA}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.VARIEDADE}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.PORTAENXERTO}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.DATA_DE_PLANTIO}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.IDADE}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.qtde_plantas ?? 'N/A'}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
+                  {producaoCaixas[talhao.id]?.toFixed(2) ?? '0.00'}
+                </td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
+                  {talhao.AREA && parseFloat(talhao.AREA) > 0
+                    ? (producaoCaixas[talhao.id] / parseFloat(talhao.AREA)).toFixed(2)
+                    : 'N/A'}
+                </td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
+                  <div style={{ backgroundColor: talhao.COR, width: '20px', height: '20px', display: 'inline-block', borderRadius: '3px' }}></div>
+                </td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
+                  {talhao.ativo ? 'Ativo' : 'Inativo'}
                 </td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', display: 'flex', gap: '10px' }}>
                   <div style={{ position: 'relative' }}>

@@ -2,12 +2,15 @@
 @import 'leaflet/dist/leaflet.css';
 
 // Variáveis de cores
-$primary-color: #2e7d32; // Verde escuro
-$secondary-color: #4caf50; // Verde claro
-$background-color: #f5f5f5; // Cinza claro
+$primary-color: #2e7d32;
+$secondary-color: #4caf50;
+$background-color: #f5f5f5;
 $text-color: #333;
 $border-color: #ddd;
 $danger-color: #d32f2f;
+$excel-color: #1b5e20;
+$import-color: #0288d1;
+$export-color: #f57c00;
 
 // Estilos globais
 * {
@@ -66,6 +69,25 @@ body {
   overflow-y: auto;
 }
 
+// Estilização de cabeçalhos e botões
+.header-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+
+  h2, h3 {
+    margin: 0;
+    color: $text-color;
+  }
+
+  .button-group {
+    display: flex;
+    gap: 10px;
+    position: relative;
+  }
+}
+
 // Estilização de tabelas
 table {
   width: 100%;
@@ -86,6 +108,10 @@ table {
   tr:nth-child(even) {
     background-color: color.adjust($background-color, $lightness: 2%);
   }
+
+  tr:hover {
+    background-color: #f0f0f0;
+  }
 }
 
 // Estilização de botões
@@ -96,6 +122,9 @@ button {
   cursor: pointer;
   font-weight: bold;
   transition: background-color 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 
   &.primary {
     background-color: $primary-color;
@@ -115,9 +144,106 @@ button {
     }
   }
 
+  &.excel {
+    background-color: $excel-color;
+    color: white;
+
+    &:hover {
+      background-color: color.adjust($excel-color, $lightness: -10%);
+    }
+  }
+
+  &.export {
+    background-color: $export-color;
+    color: white;
+
+    &:hover {
+      background-color: color.adjust($export-color, $lightness: -10%);
+    }
+  }
+
   &:disabled {
     background-color: #ccc;
     cursor: not-allowed;
+  }
+
+  &.icon-button {
+    padding: 8px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+// Estilização do botão de importação
+.import {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  background-color: $import-color;
+  color: white;
+  transition: background-color 0.3s ease;
+
+  &:hover {
+    background-color: color.adjust($import-color, $lightness: -10%);
+  }
+
+  input[type="file"] {
+    display: none;
+  }
+}
+
+// Estilização do menu suspenso de exportação
+.dropdown {
+  position: relative;
+
+  .dropdown-toggle {
+    background-color: $export-color;
+    color: white;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    transition: background-color 0.3s ease;
+
+    &:hover {
+      background-color: color.adjust($export-color, $lightness: -10%);
+    }
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background-color: white;
+    border: 1px solid $border-color;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    z-index: 1000;
+    min-width: 120px;
+    margin-top: 5px;
+
+    button {
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      background-color: transparent;
+      color: $text-color;
+      text-align: left;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+
+      &:hover {
+        background-color: #f0f0f0;
+      }
+    }
   }
 }
 
@@ -127,45 +253,92 @@ form {
   gap: 12px;
   max-width: 400px;
 
-  input {
-    padding: 10px;
-    border: 1px solid $border-color;
-    border-radius: 4px;
-    font-size: 14px;
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
 
-    &:disabled {
-      background-color: $background-color;
-      cursor: not-allowed;
+    label {
+      font-size: 12px;
+      color: $text-color;
     }
 
-    &[type="number"] {
-      appearance: textfield;
-      &::-webkit-inner-spin-button,
-      &::-webkit-outer-spin-button {
-        -webkit-appearance: none;
-        margin: 0;
+    input, select {
+      padding: 10px;
+      border: 1px solid $border-color;
+      border-radius: 4px;
+      font-size: 14px;
+
+      &:disabled {
+        background-color: $background-color;
+        cursor: not-allowed;
+      }
+
+      &[type="number"] {
+        appearance: textfield;
+        &::-webkit-inner-spin-button,
+        &::-webkit-outer-spin-button {
+          -webkit-appearance: none;
+          margin: 0;
+        }
+      }
+
+      &[type="color"] {
+        padding: 2px;
+        height: 40px;
+        cursor: pointer;
       }
     }
 
-    &[type="color"] {
-      padding: 2px;
-      height: 40px;
-      cursor: pointer;
-    }
-  }
-
-  .input-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    input {
-      flex: 1;
+    .warning-message {
+      color: $danger-color;
+      font-size: 12px;
+      margin-top: 5px;
+      margin-bottom: 0;
     }
 
-    span {
-      font-size: 14px;
-      color: $text-color;
+    .autocomplete-list {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 1;
+      background-color: white;
+      border: 1px solid $border-color;
+      border-radius: 4px;
+      list-style: none;
+      padding: 5px 0;
+      margin: 2px 0 0 0;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      max-height: 150px;
+      overflow-y: auto;
+
+      li {
+        padding: 8px 10px;
+        cursor: pointer;
+        font-size: 14px;
+        color: $text-color;
+        transition: background-color 0.3s;
+
+        &:hover {
+          background-color: #f0f0f0;
+        }
+      }
+    }
+
+    .input-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      input {
+        flex: 1;
+      }
+
+      span {
+        font-size: 14px;
+        color: $text-color;
+      }
     }
   }
 }
@@ -226,7 +399,7 @@ form {
   .close-button {
     background: none;
     border: none;
-    font-size: 20px;
+    font-size: 24px;
     cursor: pointer;
     color: $text-color;
   }
@@ -268,8 +441,8 @@ form {
   font-size: 12px;
   font-weight: bold;
   text-align: center;
-  color: #ffffff; // Cor branca para contraste
-  text-shadow: 1px 1px 2px #000000, -1px -1px 2px #000000, 1px -1px 2px #000000, -1px 1px 2px #000000; // Sombra para legibilidade
+  color: #ffffff;
+  text-shadow: 1px 1px 2px #000000, -1px -1px 2px #000000, 1px -1px 2px #000000, -1px 1px 2px #000000;
   line-height: 1.2;
   display: inline-block;
   white-space: nowrap;
@@ -303,7 +476,7 @@ form {
     .close-button {
       background: none;
       border: none;
-      font-size: 20px;
+      font-size: 24px;
       cursor: pointer;
       color: $text-color;
     }
