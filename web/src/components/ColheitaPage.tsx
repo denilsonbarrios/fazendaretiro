@@ -102,7 +102,7 @@ interface ColheitaPageProps {
   safraId: string | null;
 }
 
-export function ColheitaPage({ safraId }: ColheitaPageProps) {
+function ColheitaPage({ safraId }: ColheitaPageProps) {
   const [activeSubTab, setActiveSubTab] = useState<string>('carregamentos');
   const [carregamentos, setCarregamentos] = useState<Carregamento[]>([]);
   const [prevRealizado, setPrevRealizado] = useState<PrevRealizado[]>([]);
@@ -1604,3 +1604,5 @@ export function ColheitaPage({ safraId }: ColheitaPageProps) {
     </div>
   );
 }
+
+export default ColheitaPage;

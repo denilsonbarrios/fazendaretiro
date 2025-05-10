@@ -14,7 +14,7 @@ const upload = multer({ dest: 'uploads/' });
 
 // Enable CORS for requests from the frontend origin
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5000'], // Permitir frontend em portas diferentes
+  origin: ['http://localhost:5173', 'http://localhost:5000', 'http://localhost:4173'], // Permitir frontend em portas diferentes
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type'],
 }));
@@ -111,6 +111,10 @@ app.post(
       return;
     }
 
+    // Buscar todos os talhões existentes no banco de dados
+    const existingTalhoes = await fetchQuery<any>('SELECT * FROM talhoes', []);
+    console.log(`Total de talhões existentes no banco: ${existingTalhoes.length}`);
+
     const kmlId = generateId();
     const kmlSql = `
       INSERT INTO kml_files (id, name, content)
@@ -119,19 +123,46 @@ app.post(
     await runQuery(kmlSql, [kmlId, req.file.originalname, kmlContent]);
     console.log('KML saved to database:', kmlId);
 
-    const existingTalhaoIds = new Set<string>();
-    const talhaoSql = `
-      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates, ativo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+    const processedTalhaoIds = new Set<string>();
 
     for (const feature of geojson.features) {
       if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
         const talhaoId = feature.properties?.name || feature.properties?.Name;
-        if (talhaoId && !existingTalhaoIds.has(talhaoId)) {
-          console.log(`Processing talhao: ${talhaoId}`);
-          const geometry = feature.geometry as Polygon | MultiPolygon;
-          const coordinates = JSON.stringify(geometry.coordinates);
+        if (!talhaoId) {
+          console.log('Feature ignorada: nome do placemark não encontrado');
+          continue;
+        }
+
+        if (processedTalhaoIds.has(talhaoId)) {
+          console.log(`Placemark ${talhaoId} já processado, ignorando duplicata`);
+          continue;
+        }
+
+        console.log(`Processando placemark: ${talhaoId}`);
+        const geometry = feature.geometry as Polygon | MultiPolygon;
+        const coordinates = geometry.coordinates;
+
+        // Verificar se já existe um talhão com o mesmo TalhaoID ou NOME
+        const existingTalhao = existingTalhoes.find(
+          (talhao: any) => talhao.TalhaoID === talhaoId || talhao.NOME === talhaoId
+        );
+
+        if (existingTalhao) {
+          // Talhão já existe, atualizar apenas as coordenadas
+          const updateSql = `
+            UPDATE talhoes
+            SET coordinates = ?
+            WHERE id = ?
+          `;
+          await runQuery(updateSql, [JSON.stringify(coordinates), existingTalhao.id]);
+          console.log(`Coordenadas do talhão ${existingTalhao.NOME} (ID: ${existingTalhao.id}) atualizadas.`);
+        } else {
+          // Criar um novo talhão
+          const talhaoIdGenerated = generateId();
+          const talhaoSql = `
+            INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates, ativo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `;
           const talhao = {
             TalhaoID: talhaoId,
             TIPO: 'Talhao',
@@ -145,10 +176,9 @@ app.post(
             PRODUCAO_HECTARE: 0,
             COR: '#00FF00',
             qtde_plantas: 0,
-            coordinates,
+            coordinates: JSON.stringify(coordinates),
             ativo: 1,
           };
-          const talhaoIdGenerated = generateId();
           await runQuery(talhaoSql, [
             talhaoIdGenerated,
             talhao.TalhaoID,
@@ -166,11 +196,10 @@ app.post(
             talhao.coordinates,
             talhao.ativo,
           ]);
-          console.log(`Talhão criado: ${talhaoId}`);
-          existingTalhaoIds.add(talhaoId);
-        } else {
-          console.log(`Talhão ignorado: ${talhaoId} (já existe ou nome não encontrado)`);
+          console.log(`Novo talhão criado: ${talhaoId} (ID: ${talhaoIdGenerated})`);
         }
+
+        processedTalhaoIds.add(talhaoId);
       } else {
         console.log(`Feature ignorada: geometria não é Polygon ou MultiPolygon (${feature.geometry.type})`);
       }
@@ -179,10 +208,12 @@ app.post(
     await fs.unlink(filePath);
     console.log('Temporary file deleted:', filePath);
 
-    res.status(200).json({ message: 'KML uploaded and processed successfully', kmlId });
+    res.status(200).json({ 
+      message: 'KML uploaded and processed successfully. Existing talhões updated, new talhões created as needed.',
+      kmlId 
+    });
   })
 );
-
 // Endpoint para listar safras
 app.get(
   '/safras',

@@ -44,7 +44,7 @@ interface DataPageProps {
   safraId?: string | null;
 }
 
-export function DataPage({ safraId }: DataPageProps) {
+function DataPage({ safraId }: DataPageProps) {
   const [talhoes, setTalhoes] = useState<Talhao[]>([]);
   const [filteredTalhoes, setFilteredTalhoes] = useState<Talhao[]>([]);
   const [formData, setFormData] = useState<TalhaoFormData | null>(null);
@@ -364,6 +364,12 @@ export function DataPage({ safraId }: DataPageProps) {
       VARIEDADE: newVariedade,
       COR: newColor,
     } : prev);
+  };
+
+  const formatBrazilianDate = (dateString: string): string => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   };
 
   return (
@@ -1086,7 +1092,7 @@ export function DataPage({ safraId }: DataPageProps) {
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.AREA}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.VARIEDADE}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.PORTAENXERTO}</td>
-                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.DATA_DE_PLANTIO}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{formatBrazilianDate(talhao.DATA_DE_PLANTIO)}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.IDADE}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.qtde_plantas ?? 'N/A'}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
@@ -1163,3 +1169,5 @@ export function DataPage({ safraId }: DataPageProps) {
     </div>
   );
 }
+
+export default DataPage;

@@ -27,7 +27,7 @@ interface MapPageProps {
   safraId?: string | null;
 }
 
-export function MapPage({ safraId }: MapPageProps) {
+function MapPage({ safraId }: MapPageProps) {
   const { talhoes, error, fetchData } = useMapData();
   const [selectedTalhao, setSelectedTalhao] = useState<Talhao | null>(null);
   const [producaoCaixa, setProducaoCaixa] = useState<number>(0);
@@ -144,6 +144,12 @@ export function MapPage({ safraId }: MapPageProps) {
     return Array.from(varietiesMap.entries());
   };
 
+  const formatBrazilianDate = (dateString: string): string => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  };
+
   const farmStats = calculateFarmStats();
   const varietiesLegend = getVarietiesLegend();
 
@@ -224,6 +230,7 @@ export function MapPage({ safraId }: MapPageProps) {
                             <strong>Nome:</strong> {talhao.NOME}<br />
                             <strong>Área:</strong> {talhao.AREA}<br />
                             <strong>Variedade:</strong> {talhao.VARIEDADE}<br />
+                            <strong>Data de Plantio:</strong> {formatBrazilianDate(talhao.DATA_DE_PLANTIO)}<br />
                             <strong>Idade:</strong> {talhao.IDADE}
                           </div>
                         </Popup>
@@ -400,7 +407,7 @@ export function MapPage({ safraId }: MapPageProps) {
                     borderBottom: '1px solid #ddd',
                     fontSize: '14px',
                     color: '#333',
-                  }}>{selectedTalhao.DATA_DE_PLANTIO}</td>
+                  }}>{formatBrazilianDate(selectedTalhao.DATA_DE_PLANTIO)}</td>
                 </tr>
                 <tr>
                   <td style={{
@@ -468,3 +475,5 @@ export function MapPage({ safraId }: MapPageProps) {
     </div>
   );
 }
+
+export default MapPage;

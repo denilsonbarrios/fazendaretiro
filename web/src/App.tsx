@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
-import { MapPage } from './components/MapPage';
-import { KmlPage } from './components/KmlPage';
-import { DataPage } from './components/DataPage';
-import { ConfigPage } from './components/ConfigPage';
-import { ColheitaPage } from './components/ColheitaPage';
+import { useState, useEffect, Suspense, lazy } from 'react';
 import './styles/main.scss';
+
+// Carregar componentes de forma assíncrona
+const MapPage = lazy(() => import('./components/MapPage'));
+const KmlPage = lazy(() => import('./components/KmlPage'));
+const DataPage = lazy(() => import('./components/DataPage'));
+const ConfigPage = lazy(() => import('./components/ConfigPage'));
+const ColheitaPage = lazy(() => import('./components/ColheitaPage'));
 
 // Interface para Safra
 interface Safra {
@@ -196,11 +198,13 @@ export default function App() {
       )}
 
       <div className="page">
-        {activeTab === 'map' && <MapPage safraId={selectedSafra} />}
-        {activeTab === 'colheita' && <ColheitaPage safraId={selectedSafra} />}
-        {activeTab === 'data' && <DataPage safraId={selectedSafra} />}
-        {activeTab === 'kml' && <KmlPage />}
-        {activeTab === 'config' && <ConfigPage onSafraChange={fetchSafras} />}
+        <Suspense fallback={<div>Carregando...</div>}>
+          {activeTab === 'map' && <MapPage safraId={selectedSafra} />}
+          {activeTab === 'colheita' && <ColheitaPage safraId={selectedSafra} />}
+          {activeTab === 'data' && <DataPage safraId={selectedSafra} />}
+          {activeTab === 'kml' && <KmlPage />}
+          {activeTab === 'config' && <ConfigPage onSafraChange={fetchSafras} />}
+        </Suspense>
       </div>
     </div>
   );

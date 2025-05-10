@@ -15,7 +15,7 @@ interface Talhao {
   ativo: boolean;
 }
 
-export function KmlPage() {
+function KmlPage() {
   const [kmls, setKmls] = useState<KmlFile[]>([]);
   const [message, setMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -149,25 +149,7 @@ export function KmlPage() {
         type: file.type,
       });
 
-      // Excluir KMLs existentes
-      const deletePromises = kmls.map((kml) =>
-        fetch(`${BASE_URL}/kml_files/${kml.id}`, { method: 'DELETE' })
-          .then((response) => {
-            if (!response.ok) {
-              throw new Error(`Erro ao excluir KML ${kml.id}: ${response.status}`);
-            }
-            console.log(`KML ${kml.id} excluído com sucesso`);
-          })
-          .catch((error) => {
-            console.error(`Erro ao excluir KML ${kml.id}:`, error);
-            throw error;
-          })
-      );
-
-      await Promise.all(deletePromises);
-      console.log('KmlPage: Todos os KMLs existentes foram excluídos');
-
-      // Enviar o novo arquivo KML
+      // Enviar o novo arquivo KML sem excluir os existentes
       const formData = new FormData();
       formData.append('kmlFile', file);
       console.log('Enviando requisição para /kml/upload');
@@ -184,8 +166,9 @@ export function KmlPage() {
       const result = await response.json();
       console.log('KmlPage: KML processado pelo backend:', result);
 
+      // Atualizar a lista de KMLs e talhões
       await fetchKmls();
-      setMessage('Arquivo KML carregado e processado com sucesso!');
+      setMessage('Arquivo KML carregado e processado com sucesso! Talhões existentes foram atualizados e novos talhões foram criados conforme necessário.');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao carregar arquivo KML';
       setMessage(errorMessage);
@@ -359,3 +342,5 @@ export function KmlPage() {
     </div>
   );
 }
+
+export default KmlPage;

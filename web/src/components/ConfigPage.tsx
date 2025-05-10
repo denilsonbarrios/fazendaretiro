@@ -24,7 +24,7 @@ interface ConfigPageProps {
   onSafraChange?: () => void; // Callback para notificar mudanças nas safras
 }
 
-export function ConfigPage({ onSafraChange }: ConfigPageProps) {
+function ConfigPage({ onSafraChange }: ConfigPageProps) {
   const [tipoConfigs, setTipoConfigs] = useState<ConfigOption[]>([]);
   const [variedadeConfigs, setVariedadeConfigs] = useState<ConfigOption[]>([]);
   const [safras, setSafras] = useState<Safra[]>([]);
@@ -465,3 +465,5 @@ export function ConfigPage({ onSafraChange }: ConfigPageProps) {
     </div>
   );
 }
+
+export default ConfigPage;
