@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable'; // Importar o autoTable explicitamente
 import { ColheitaDashboard } from './ColheitaDashboard';
 
 // Interfaces ajustadas com base nas mudanças no backend
@@ -931,7 +931,8 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       tableRows.push(rowData);
     });
 
-    (doc as any).autoTable({
+    // Usar autoTable como uma função standalone, passando o doc como argumento
+    autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
       theme: 'striped',
