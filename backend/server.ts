@@ -160,8 +160,8 @@ app.post(
           // Criar um novo talhão
           const talhaoIdGenerated = generateId();
           const talhaoSql = `
-            INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates, ativo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, FALHAS, ESP, COR, qtde_plantas, coordinates, OBS, ativo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `;
           const talhao = {
             TalhaoID: talhaoId,
@@ -172,11 +172,12 @@ app.post(
             PORTAENXERTO: '',
             DATA_DE_PLANTIO: '',
             IDADE: 0,
-            PRODUCAO_CAIXA: 0,
-            PRODUCAO_HECTARE: 0,
+            FALHAS: 0,
+            ESP: 0,
             COR: '#00FF00',
             qtde_plantas: 0,
             coordinates: JSON.stringify(coordinates),
+            OBS: '',
             ativo: 1,
           };
           await runQuery(talhaoSql, [
@@ -189,11 +190,12 @@ app.post(
             talhao.PORTAENXERTO,
             talhao.DATA_DE_PLANTIO,
             talhao.IDADE,
-            talhao.PRODUCAO_CAIXA,
-            talhao.PRODUCAO_HECTARE,
+            talhao.FALHAS,
+            talhao.ESP,
             talhao.COR,
             talhao.qtde_plantas || 0,
             talhao.coordinates,
+            talhao.OBS,
             talhao.ativo,
           ]);
           console.log(`Novo talhão criado: ${talhaoId} (ID: ${talhaoIdGenerated})`);
@@ -214,6 +216,7 @@ app.post(
     });
   })
 );
+
 // Endpoint para listar safras
 app.get(
   '/safras',
@@ -313,6 +316,7 @@ app.get(
       id: t.id,
       TalhaoID: t.TalhaoID,
       NOME: t.NOME,
+      OBS: t.OBS,
       ativo: t.ativo,
     })));
     res.status(200).json(talhoes);
@@ -471,11 +475,12 @@ app.post(
       PORTAENXERTO,
       DATA_DE_PLANTIO,
       IDADE,
-      PRODUCAO_CAIXA,
-      PRODUCAO_HECTARE,
+      FALHAS,
+      ESP,
       COR,
       qtde_plantas,
       coordinates,
+      OBS,
       ativo,
     } = req.body;
 
@@ -497,8 +502,8 @@ app.post(
 
     const talhaoId = generateId();
     const sql = `
-      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, PRODUCAO_CAIXA, PRODUCAO_HECTARE, COR, qtde_plantas, coordinates, ativo)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, FALHAS, ESP, COR, qtde_plantas, coordinates, OBS, ativo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await runQuery(sql, [
       talhaoId,
@@ -510,11 +515,12 @@ app.post(
       PORTAENXERTO || null,
       DATA_DE_PLANTIO || null,
       IDADE || null,
-      PRODUCAO_CAIXA || null,
-      PRODUCAO_HECTARE || null,
+      FALHAS || null,
+      ESP || null,
       COR || null,
       qtde_plantas || null,
       coordinates ? JSON.stringify(coordinates) : null,
+      OBS || null,
       ativo !== undefined ? (ativo ? 1 : 0) : 1,
     ]);
     console.log(`Talhao criado: ${talhaoId}, TalhaoID: ${TalhaoID}, NOME: ${NOME}`);
@@ -536,10 +542,11 @@ app.put(
       PORTAENXERTO,
       DATA_DE_PLANTIO,
       IDADE,
-      PRODUCAO_CAIXA,
-      PRODUCAO_HECTARE,
+      FALHAS,
+      ESP,
       COR,
       qtde_plantas,
+      OBS,
       ativo,
     } = req.body;
 
@@ -569,7 +576,7 @@ app.put(
 
     const sql = `
       UPDATE talhoes
-      SET TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, PRODUCAO_CAIXA = ?, PRODUCAO_HECTARE = ?, COR = ?, qtde_plantas = ?, ativo = ?
+      SET TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, FALHAS = ?, ESP = ?, COR = ?, qtde_plantas = ?, OBS = ?, ativo = ?
       WHERE id = ?
     `;
     await runQuery(sql, [
@@ -581,10 +588,11 @@ app.put(
       PORTAENXERTO !== undefined ? PORTAENXERTO : talhaoExistente.PORTAENXERTO,
       DATA_DE_PLANTIO !== undefined ? DATA_DE_PLANTIO : talhaoExistente.DATA_DE_PLANTIO,
       IDADE !== undefined ? IDADE : talhaoExistente.IDADE,
-      PRODUCAO_CAIXA !== undefined ? PRODUCAO_CAIXA : talhaoExistente.PRODUCAO_CAIXA,
-      PRODUCAO_HECTARE !== undefined ? PRODUCAO_HECTARE : talhaoExistente.PRODUCAO_HECTARE,
+      FALHAS !== undefined ? FALHAS : talhaoExistente.FALHAS,
+      ESP !== undefined ? ESP : talhaoExistente.ESP,
       COR !== undefined ? COR : talhaoExistente.COR,
       qtde_plantas !== undefined ? qtde_plantas : talhaoExistente.qtde_plantas,
+      OBS !== undefined ? OBS : talhaoExistente.OBS,
       ativo !== undefined ? (ativo ? 1 : 0) : talhaoExistente.ativo,
       id,
     ]);
@@ -746,16 +754,10 @@ app.post(
       }
     }
 
-    const carregamentosAnteriores = await fetchQuery<any>(
-      'SELECT qte_caixa FROM carregamentos WHERE safra_id = ? AND data <= ?',
-      [safra_id, data]
-    );
-    const totalAcumulado = carregamentosAnteriores.reduce((sum, carregamento) => sum + (carregamento.qte_caixa || 0), 0) + qte_caixa;
-
     const carregamentoId = generateId();
     const sql = `
-      INSERT INTO carregamentos (id, data, talhao_id, qtde_plantas, variedade, motorista, placa, qte_caixa, total, semana, semana_colheita, safra_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO carregamentos (id, data, talhao_id, qtde_plantas, variedade, motorista, placa, qte_caixa, semana, semana_colheita, safra_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await runQuery(sql, [
       carregamentoId,
@@ -766,7 +768,6 @@ app.post(
       motoristaNome || null,
       placa || null,
       qte_caixa,
-      totalAcumulado,
       semanaAno,
       semanaColheita,
       safra_id,
@@ -865,15 +866,9 @@ app.put(
       }
     }
 
-    const carregamentosAnteriores = await fetchQuery<any>(
-      'SELECT qte_caixa FROM carregamentos WHERE safra_id = ? AND data <= ? AND id != ?',
-      [safra_id, data, id]
-    );
-    const totalAcumulado = carregamentosAnteriores.reduce((sum, carregamento) => sum + (carregamento.qte_caixa || 0), 0) + qte_caixa;
-
     const sql = `
       UPDATE carregamentos
-      SET data = ?, talhao_id = ?, qtde_plantas = ?, variedade = ?, motorista = ?, placa = ?, qte_caixa = ?, total = ?, semana = ?, semana_colheita = ?, safra_id = ?
+      SET data = ?, talhao_id = ?, qtde_plantas = ?, variedade = ?, motorista = ?, placa = ?, qte_caixa = ?, semana = ?, semana_colheita = ?, safra_id = ?
       WHERE id = ?
     `;
     await runQuery(sql, [
@@ -884,7 +879,6 @@ app.put(
       motoristaNome || null,
       placa || null,
       qte_caixa,
-      totalAcumulado,
       semanaAno,
       semanaColheita,
       safra_id,

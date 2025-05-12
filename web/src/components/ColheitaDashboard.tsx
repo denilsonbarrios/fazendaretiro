@@ -24,7 +24,6 @@ interface Carregamento {
   motorista: string;
   placa: string;
   qte_caixa: number;
-  total: number;
   semana: number;
   semana_colheita: number;
   safra_id: string;
@@ -40,11 +39,12 @@ interface Talhao {
   PORTAENXERTO: string;
   DATA_DE_PLANTIO: string;
   IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
+  FALHAS: number;
+  ESP: string;
   COR: string;
   qtde_plantas?: number;
   ativo: boolean;
+  OBS?: string;
 }
 
 interface ColheitaDashboardProps {

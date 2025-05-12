@@ -11,8 +11,8 @@ interface Talhao {
   PORTAENXERTO: string;
   DATA_DE_PLANTIO: string;
   IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
+  FALHAS: number;
+  ESP: string;
   COR: string;
   qtde_plantas?: number;
   coordinates?: string;

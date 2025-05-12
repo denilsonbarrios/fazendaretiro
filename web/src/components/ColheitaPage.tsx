@@ -1,102 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable'; // Importar o autoTable explicitamente
+import autoTable from 'jspdf-autotable';
 import { ColheitaDashboard } from './ColheitaDashboard';
-
-// Interfaces ajustadas com base nas mudanças no backend
-interface Carregamento {
-  id: string;
-  data: number;
-  talhao_id: string;
-  qtde_plantas: number;
-  variedade: string;
-  motorista: string;
-  placa: string;
-  qte_caixa: number;
-  total: number;
-  semana: number;
-  semana_colheita: number;
-  safra_id: string;
-}
-
-interface Motorista {
-  id: string;
-  nome: string;
-}
-
-interface PrevRealizado {
-  id: string;
-  talhao: string;
-  variedade: string;
-  qtde_plantas: number;
-  cx_pe_prev: number;
-  cx_pe_realizado: number;
-  total_cx_prev: number;
-  total_cx_realizado: number;
-  safra_id: string;
-}
-
-interface Previsao {
-  id: string;
-  talhao_id: string;
-  safra_id: string;
-  talhao_nome: string;
-  variedade: string;
-  data_de_plantio: string;
-  idade: number;
-  qtde_plantas: number;
-  qtde_caixas_prev_pe: number;
-}
-
-interface SemanaColheita {
-  id: string;
-  semana_ano: number;
-  semana_colheita: number;
-  safra_id: string;
-}
-
-interface Safra {
-  id: string;
-  nome: string;
-  is_active: boolean;
-  data_inicial_colheita: number | null;
-}
-
-interface Talhao {
-  id: string;
-  TalhaoID?: string;
-  TIPO: string;
-  NOME: string;
-  AREA: string;
-  VARIEDADE: string;
-  PORTAENXERTO: string;
-  DATA_DE_PLANTIO: string;
-  IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
-  COR: string;
-  qtde_plantas?: number;
-  ativo: boolean;
-}
-
-interface DinamicaData {
-  talhaoId: string;
-  talhaoNome: string;
-  variedade: string;
-  totalCaixas: number;
-  qtdePlantas: number;
-  mediaCaixasPorPlanta: number;
-}
-
-interface CarregamentoFormData {
-  id?: string;
-  data: string;
-  talhao_id: string;
-  motorista: string;
-  placa: string;
-  qteCaixa: number | string;
-}
+import { toast } from 'react-toastify';
+import { Talhao, Carregamento, Motorista, PrevRealizado, Previsao, SemanaColheita, Safra, DinamicaData, CarregamentoFormData } from '../types';
 
 interface ColheitaPageProps {
   safraId: string | null;
@@ -124,7 +32,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const [safras, setSafras] = useState<Safra[]>([]);
   const [talhoes, setTalhoes] = useState<Talhao[]>([]);
   const [motoristas, setMotoristas] = useState<Motorista[]>([]);
-  const [message, setMessage] = useState<string>('');
   const [showCarregamentoForm, setShowCarregamentoForm] = useState<boolean>(false);
   const [carregamentoFormData, setCarregamentoFormData] = useState<CarregamentoFormData | null>(null);
   const [motoristaInput, setMotoristaInput] = useState<string>('');
@@ -140,7 +47,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     return Math.random().toString(36).substr(2, 9);
   };
 
-  // Função auxiliar para formatar números no padrão brasileiro (ex.: 1.000,00)
   const formatNumber = (value: number, decimals: number = 2): string => {
     return new Intl.NumberFormat('pt-BR', {
       minimumFractionDigits: decimals,
@@ -158,7 +64,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       console.log('Carregamentos carregados:', filteredRecords);
       setCarregamentos(filteredRecords);
     } catch (error) {
-      setMessage('Erro ao carregar carregamentos: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar carregamentos: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -179,7 +85,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       });
       setPrevRealizado(enrichedRecords);
     } catch (error) {
-      setMessage('Erro ao carregar RESUMO: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar RESUMO: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -202,7 +108,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       console.log('Inicializando previsaoFormData:', initialFormData);
       setPrevisaoFormData(initialFormData);
     } catch (error) {
-      setMessage('Erro ao carregar previsões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar previsões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -214,7 +120,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       const records = await response.json();
       setSemanasColheita(records);
     } catch (error) {
-      setMessage('Erro ao carregar semanas de colheita: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar semanas de colheita: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -225,7 +131,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       const records = await response.json();
       setSafras(records);
     } catch (error) {
-      setMessage('Erro ao carregar safras: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar safras: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -249,7 +155,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       console.log('Talhões filtrados (tipo TALHAO e com NOME):', filteredTalhoes);
       setTalhoes(filteredTalhoes);
     } catch (error) {
-      setMessage('Erro ao carregar talhões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar talhões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -261,6 +167,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       setMotoristas(records);
     } catch (error) {
       console.error('Erro ao carregar motoristas:', error);
+      toast.error('Erro ao carregar motoristas: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -275,7 +182,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     fetchTalhoesData();
   }, [safraId]);
 
-  // Função para calcular os dados da tela "Dinâmica"
   const calculateDinamica = (): DinamicaData[] => {
     console.log('Calculando Dinâmica - Talhões:', talhoes, 'Carregamentos:', carregamentos);
     const dinamicaMap: { [key: string]: DinamicaData } = {};
@@ -310,7 +216,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     return result;
   };
 
-  // Função para filtrar os dados da Dinâmica com base nos filtros
   const filterDinamicaData = (data: DinamicaData[]): DinamicaData[] => {
     return data.filter((item) => {
       const matchesTalhaoNome = dinamicaFilters.talhaoNome
@@ -330,7 +235,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     });
   };
 
-  // Função para parsear o nome do talhão
   const parseTalhaoName = (nome: string | undefined | null): { number: number; suffix: string } => {
     if (!nome) {
       console.warn('Nome do talhão é undefined ou null, retornando valores padrão');
@@ -346,7 +250,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     return { number: 0, suffix: nome };
   };
 
-  // Função para calcular os dados da tela "PREV-REALIZADO"
   const calculatePrevRealizado = (): PrevRealizado[] => {
     console.log('Calculando PREV-REALIZADO - Talhões:', talhoes, 'Carregamentos:', carregamentos, 'Previsões:', previsoes);
     const carregamentosPorTalhao: { [talhaoId: string]: { totalCaixas: number; qtdePlantas: number } } = {};
@@ -406,14 +309,12 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
           total_cx_realizado: totalCxRealizado,
         };
       })
-      // Filtrar talhões "vazios" (sem previsão e sem realização)
       .filter((item) => item.total_cx_prev > 0 || item.total_cx_realizado > 0);
 
     console.log('Dados do PREV-REALIZADO calculados (filtrados):', enrichedPrevRealizado);
     return enrichedPrevRealizado;
   };
 
-  // Função para calcular o resumo geral e os totais
   const calculateResumoGeral = (prevRealizadoData: PrevRealizado[]) => {
     const resumo: { [variedade: string]: { previsto: number; realizado: number; proporcao: number } } = {};
     let totalPrevisto = 0;
@@ -430,7 +331,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       totalRealizado += item.total_cx_realizado;
     });
 
-    // Filtrar variedades "vazias" (sem previsão e sem realização)
     Object.keys(resumo).forEach((variedade) => {
       if (resumo[variedade].previsto === 0 && resumo[variedade].realizado === 0) {
         delete resumo[variedade];
@@ -443,17 +343,13 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     return { data: resumo, totalPrevisto, totalRealizado };
   };
 
-  // useEffect para recalcular "Dinâmica" e "PREV-REALIZADO" quando talhoes, carregamentos ou previsoes mudarem
   useEffect(() => {
-    // Calcular "Dinâmica"
     const newDinamicaData = calculateDinamica();
     setDinamicaData(newDinamicaData);
 
-    // Calcular "PREV-REALIZADO"
     const newEnrichedPrevRealizado = calculatePrevRealizado();
     setEnrichedPrevRealizado(newEnrichedPrevRealizado);
 
-    // Calcular "Resumo Geral" com base no PREV-REALIZADO atualizado
     const newResumoGeral = calculateResumoGeral(newEnrichedPrevRealizado);
     setResumoGeral(newResumoGeral);
   }, [talhoes, carregamentos, previsoes, prevRealizado, safraId]);
@@ -464,22 +360,22 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
 
     const selectedTalhao = talhoes.find((t) => t.id === carregamentoFormData.talhao_id);
     if (!selectedTalhao) {
-      setMessage('Erro: Talhão não encontrado.');
+      toast.error('Erro: Talhão não encontrado.');
       return;
     }
 
     if (!selectedTalhao.ativo) {
-      setMessage(`Erro: O talhão ${selectedTalhao.NOME} está inativo e não pode ser usado para carregamentos.`);
+      toast.error(`Erro: O talhão ${selectedTalhao.NOME} está inativo e não pode ser usado para carregamentos.`);
       return;
     }
 
     if (selectedTalhao.qtde_plantas === undefined || selectedTalhao.qtde_plantas === null) {
-      setMessage(`Erro: O talhão ${selectedTalhao.NOME} não tem a quantidade de plantas preenchida. Por favor, atualize o talhão.`);
+      toast.error(`Erro: O talhão ${selectedTalhao.NOME} não tem a quantidade de plantas preenchida. Por favor, atualize o talhão.`);
       return;
     }
 
     if (!selectedTalhao.VARIEDADE) {
-      setMessage(`Erro: O talhão ${selectedTalhao.NOME} não tem a variedade preenchida. Por favor, atualize o talhão.`);
+      toast.error(`Erro: O talhão ${selectedTalhao.NOME} não tem a variedade preenchida. Por favor, atualize o talhão.`);
       return;
     }
 
@@ -515,16 +411,16 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       setMotoristas([]);
       setIsEditing(false);
       await fetchCarregamentosData();
-      setMessage(`Carregamento ${isEditing ? 'atualizado' : 'adicionado'} com sucesso!`);
+      toast.success(`Carregamento ${isEditing ? 'atualizado' : 'adicionado'} com sucesso!`);
     } catch (error) {
-      setMessage(`Erro ao ${isEditing ? 'atualizar' : 'adicionar'} carregamento: ` + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error(`Erro ao ${isEditing ? 'atualizar' : 'adicionar'} carregamento: ` + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
   const handleEditCarregamento = (carregamento: Carregamento) => {
     const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
     if (talhao && !talhao.ativo) {
-      setMessage(`Erro: O talhão ${talhao.NOME} está inativo e não pode ser editado.`);
+      toast.error(`Erro: O talhão ${talhao.NOME} está inativo e não pode ser editado.`);
       return;
     }
 
@@ -554,9 +450,9 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
         throw new Error(errorData.error || 'Erro ao excluir carregamento');
       }
       await fetchCarregamentosData();
-      setMessage('Carregamento excluído com sucesso!');
+      toast.success('Carregamento excluído com sucesso!');
     } catch (error) {
-      setMessage('Erro ao excluir carregamento: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao excluir carregamento: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -614,7 +510,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   };
 
   const getTextColorForProgressBar = (backgroundColor: string) => {
-    // Para barras verdes e azuis, o texto será branco; para amarelas e vermelhas, será preto
     return backgroundColor === 'green' || backgroundColor === 'blue' ? '#fff' : '#000';
   };
 
@@ -635,7 +530,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     const previsao = previsaoFormData[talhaoId];
     console.log('Salvando previsão para talhaoId:', talhaoId, 'Dados:', previsao);
     if (!previsao || !previsao.safraId || previsao.qtdeCaixasPrevPe === undefined) {
-      setMessage('Erro: Selecione uma safra e preencha a quantidade de caixas previstas por pé.');
+      toast.error('Erro: Selecione uma safra e preencha a quantidade de caixas previstas por pé.');
       return;
     }
 
@@ -656,13 +551,12 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       }
 
       await fetchPrevisoesData();
-      setMessage('Previsão salva com sucesso!');
+      toast.success('Previsão salva com sucesso!');
     } catch (error) {
-      setMessage('Erro ao salvar previsão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao salvar previsão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
-  // Função para baixar o modelo de Excel
   const downloadExcelTemplate = () => {
     const templateData = [
       {
@@ -681,7 +575,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     XLSX.writeFile(wb, 'modelo_carregamentos.xlsx');
   };
 
-  // Função para cadastrar um motorista ou retornar um existente
   const cadastrarMotorista = async (nome: string): Promise<Motorista> => {
     try {
       const motoristaNome = nome.toUpperCase();
@@ -721,14 +614,11 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     }
   };
 
-  // Função para cadastrar ou atualizar um talhão
   const cadastrarTalhao = async (nome: string): Promise<Talhao> => {
     try {
-      // Verificar se o talhão já existe
       const existingTalhao = talhoes.find((t) => t.NOME === nome);
       if (existingTalhao) {
         if (!existingTalhao.ativo) {
-          // Atualizar o talhão para ativo
           const updatedTalhao = { ...existingTalhao, ativo: true };
           const response = await fetch(`${BASE_URL}/talhoes/${existingTalhao.id}`, {
             method: 'PUT',
@@ -742,13 +632,12 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
           }
 
           console.log(`Talhão "${nome}" (ID: ${existingTalhao.id}) atualizado para ativo`);
-          await fetchTalhoesData(); // Atualizar a lista de talhões
+          await fetchTalhoesData();
           return updatedTalhao;
         }
         return existingTalhao;
       }
 
-      // Criar um novo talhão como ativo
       const talhaoData = {
         TalhaoID: null,
         TIPO: 'TALHAO',
@@ -758,11 +647,12 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
         PORTAENXERTO: '',
         DATA_DE_PLANTIO: '',
         IDADE: 0,
-        PRODUCAO_CAIXA: 0,
-        PRODUCAO_HECTARE: 0,
+        FALHAS: 0,
+        ESP: 0,
         COR: '#00FF00',
         qtde_plantas: 0,
-        ativo: true, // Criar como ativo por padrão
+        OBS: '',
+        ativo: true,
       };
 
       const response = await fetch(`${BASE_URL}/talhoes`, {
@@ -784,7 +674,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     }
   };
 
-  // Função para parsear data no formato DD/MM/AAAA ou número serial do Excel
   const parseBrazilianDate = (dateInput: string | number): number => {
     if (typeof dateInput === 'number') {
       const excelEpoch = new Date(1900, 0, 1);
@@ -806,7 +695,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     return date.getTime();
   };
 
-  // Função para importar carregamentos a partir de um arquivo Excel
   const handleImportCarregamentos = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -876,9 +764,9 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       }
 
       await fetchCarregamentosData();
-      setMessage(`Foram importados ${carregamentosToImport.length} carregamentos com sucesso!`);
+      toast.success(`Foram importados ${carregamentosToImport.length} carregamentos com sucesso!`);
     } catch (error) {
-      setMessage('Erro ao importar carregamentos: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao importar carregamentos: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     } finally {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -886,7 +774,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     }
   };
 
-  // Função para exportar carregamentos em Excel
   const exportToExcel = () => {
     const exportData = carregamentos.map((carregamento) => {
       const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
@@ -899,7 +786,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
         'Motorista': carregamento.motorista,
         'Placa': carregamento.placa,
         'Quantidade de Caixas': formatNumber(carregamento.qte_caixa),
-        'Total': formatNumber(carregamento.total),
       };
     });
 
@@ -909,10 +795,9 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     XLSX.writeFile(wb, 'carregamentos_exportados.xlsx');
   };
 
-  // Função para exportar carregamentos em PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
-    const tableColumn = ['Data', 'Talhão', 'Ativo', 'Qtde Plantas', 'Variedade', 'Motorista', 'Placa', 'Qte de Caixa', 'Total'];
+    const tableColumn = ['Data', 'Talhão', 'Ativo', 'Qtde Plantas', 'Variedade', 'Motorista', 'Placa', 'Qte de Caixa'];
     const tableRows: any[] = [];
 
     carregamentos.forEach((carregamento) => {
@@ -926,12 +811,10 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
         carregamento.motorista,
         carregamento.placa,
         formatNumber(carregamento.qte_caixa),
-        formatNumber(carregamento.total),
       ];
       tableRows.push(rowData);
     });
 
-    // Usar autoTable como uma função standalone, passando o doc como argumento
     autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
@@ -964,12 +847,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
           </div>
         ))}
       </div>
-
-      {message && (
-        <p className={`message ${message.includes('Erro') ? 'error' : 'success'}`}>
-          {message}
-        </p>
-      )}
 
       {activeSubTab === 'dashboard' && (
         <div>
@@ -1165,7 +1042,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
                     <th>Motorista</th>
                     <th>Placa</th>
                     <th>Qte de Caixa</th>
-                    <th>Total</th>
                     <th>Ações</th>
                   </tr>
                 </thead>
@@ -1183,7 +1059,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
                         <td>{carregamento.motorista}</td>
                         <td>{carregamento.placa}</td>
                         <td>{formatNumber(carregamento.qte_caixa)}</td>
-                        <td>{formatNumber(carregamento.total)}</td>
                         <td style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'center' }}>
                           <button
                             className="primary icon-button"

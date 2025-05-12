@@ -3,28 +3,34 @@ import { useEffect, useState, useRef } from 'react';
 import { useMapData } from '../hooks/useMapData';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { toast } from 'react-toastify';
+import { Talhao } from '../types'; // Importar a interface Talhao do types.ts
 
-// Interface para Talhao
-interface Talhao {
-  id: string;
-  TalhaoID?: string;
+interface TalhaoFormData {
+  TalhaoID: string | null;
   TIPO: string;
   NOME: string;
-  AREA: string;
+  AREA: number;
   VARIEDADE: string;
   PORTAENXERTO: string;
   DATA_DE_PLANTIO: string;
   IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
+  FALHAS: number;
+  ESP: string;
   COR: string;
-  qtde_plantas?: number;
-  coordinates?: string;
+  QTDE_PLANTAS: number;
+  OBS: string;
   ativo: boolean;
 }
 
 interface MapPageProps {
   safraId?: string | null;
+}
+
+interface ConfigOption {
+  id: string;
+  name: string;
+  default_color: string;
 }
 
 function MapPage({ safraId }: MapPageProps) {
@@ -34,10 +40,14 @@ function MapPage({ safraId }: MapPageProps) {
   const mapRef = useRef<L.Map | null>(null);
   const initialZoomRef = useRef<number>(13);
   const hasSetBoundsRef = useRef<boolean>(false);
+  const [showEditForm, setShowEditForm] = useState<boolean>(false);
+  const [formData, setFormData] = useState<TalhaoFormData | null>(null);
+  const [editingTalhao, setEditingTalhao] = useState<Talhao | null>(null);
+  const [tipoOptions, setTipoOptions] = useState<ConfigOption[]>([]);
+  const [variedadeOptions, setVariedadeOptions] = useState<ConfigOption[]>([]);
 
   const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
-  // Função para buscar a produção de caixas do talhão selecionado
   const fetchProducaoCaixa = async (talhaoId: string) => {
     if (!safraId) return;
     try {
@@ -49,6 +59,139 @@ function MapPage({ safraId }: MapPageProps) {
       console.error('Erro ao carregar produção de caixas:', error);
       setProducaoCaixa(0);
     }
+  };
+
+  const fetchConfigs = async () => {
+    try {
+      const tipoResponse = await fetch(`${BASE_URL}/tipo_configs`);
+      if (!tipoResponse.ok) throw new Error('Erro ao buscar tipos');
+      const tipoRecords = await tipoResponse.json();
+
+      const variedadeResponse = await fetch(`${BASE_URL}/variedade_configs`);
+      if (!variedadeResponse.ok) throw new Error('Erro ao buscar variedades');
+      const variedadeRecords = await variedadeResponse.json();
+
+      setTipoOptions(tipoRecords);
+      setVariedadeOptions(variedadeRecords);
+    } catch (error) {
+      toast.error('Erro ao carregar configurações: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      console.error('Erro ao carregar configurações:', error);
+    }
+  };
+
+  const calculateAge = (plantingDate: string): number => {
+    if (!plantingDate) return 0;
+    const today = new Date();
+    const planting = new Date(plantingDate);
+    let age = today.getFullYear() - planting.getFullYear();
+    const monthDiff = today.getMonth() - planting.getMonth();
+    const dayDiff = today.getDate() - planting.getDate();
+    if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+      age--;
+    }
+    return age < 0 ? 0 : age;
+  };
+
+  const handleEditTalhao = (talhao: Talhao) => {
+    const newFormData: TalhaoFormData = {
+      TalhaoID: talhao.TalhaoID ?? null,
+      TIPO: talhao.TIPO,
+      NOME: talhao.NOME,
+      AREA: parseFloat(talhao.AREA) || 0,
+      VARIEDADE: talhao.VARIEDADE,
+      PORTAENXERTO: talhao.PORTAENXERTO,
+      DATA_DE_PLANTIO: talhao.DATA_DE_PLANTIO,
+      IDADE: calculateAge(talhao.DATA_DE_PLANTIO),
+      FALHAS: talhao.FALHAS,
+      ESP: talhao.ESP,
+      COR: talhao.COR,
+      QTDE_PLANTAS: talhao.qtde_plantas || 0,
+      OBS: talhao.OBS || '',
+      ativo: talhao.ativo,
+    };
+    setFormData(newFormData);
+    setEditingTalhao(talhao);
+    setShowEditForm(true);
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditForm(false);
+    setFormData(null);
+    setEditingTalhao(null);
+  };
+
+  const handleUpdateTalhao = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData || !editingTalhao) return;
+
+    try {
+      const talhaoData = {
+        TalhaoID: formData.TalhaoID,
+        TIPO: formData.TIPO,
+        NOME: formData.NOME,
+        AREA: `${formData.AREA} ha`,
+        VARIEDADE: formData.VARIEDADE,
+        PORTAENXERTO: formData.PORTAENXERTO,
+        DATA_DE_PLANTIO: formData.DATA_DE_PLANTIO,
+        IDADE: formData.IDADE,
+        FALHAS: formData.FALHAS,
+        ESP: formData.ESP,
+        COR: formData.COR,
+        qtde_plantas: formData.QTDE_PLANTAS,
+        OBS: formData.OBS,
+        ativo: formData.ativo,
+      };
+
+      const response = await fetch(`${BASE_URL}/talhoes/${editingTalhao.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(talhaoData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Erro ao atualizar talhão');
+      }
+
+      setShowEditForm(false);
+      setFormData(null);
+      setEditingTalhao(null);
+      await fetchData();
+      toast.success('Talhão atualizado com sucesso!');
+    } catch (error) {
+      toast.error('Erro ao atualizar talhão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+    }
+  };
+
+  const handlePlantingDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newDate = e.target.value;
+    setFormData((prev) => prev ? {
+      ...prev,
+      DATA_DE_PLANTIO: newDate,
+      IDADE: calculateAge(newDate),
+    } : prev);
+  };
+
+  const handleTipoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newTipo = e.target.value;
+    const selectedOption = tipoOptions.find((option) => option.name === newTipo);
+    const newColor = selectedOption ? selectedOption.default_color : '#FF0000';
+    setFormData((prev) => prev ? {
+      ...prev,
+      TIPO: newTipo,
+      COR: newColor,
+    } : prev);
+  };
+
+  const handleVariedadeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newVariedade = e.target.value;
+    const selectedOption = variedadeOptions.find((option) => option.name === newVariedade);
+    const newColor = selectedOption ? selectedOption.default_color : '#FF0000';
+    setFormData((prev) => prev ? {
+      ...prev,
+      VARIEDADE: newVariedade,
+      COR: newColor,
+    } : prev);
   };
 
   function MapBounds() {
@@ -101,6 +244,7 @@ function MapPage({ safraId }: MapPageProps) {
 
   useEffect(() => {
     fetchData();
+    fetchConfigs();
   }, [safraId]);
 
   useEffect(() => {
@@ -232,6 +376,19 @@ function MapPage({ safraId }: MapPageProps) {
                             <strong>Variedade:</strong> {talhao.VARIEDADE}<br />
                             <strong>Data de Plantio:</strong> {formatBrazilianDate(talhao.DATA_DE_PLANTIO)}<br />
                             <strong>Idade:</strong> {talhao.IDADE}
+                            <button
+                              onClick={() => handleEditTalhao(talhao)}
+                              style={{
+                                border: 'none',
+                                background: 'none',
+                                cursor: 'pointer',
+                                fontSize: '16px',
+                                marginLeft: '10px',
+                              }}
+                              title="Editar Talhão"
+                            >
+                              ✏️
+                            </button>
                           </div>
                         </Popup>
                       </Polygon>
@@ -267,7 +424,6 @@ function MapPage({ safraId }: MapPageProps) {
         overflowY: 'auto',
         height: '85vh',
       }}>
-        {/* Legenda de Variedades */}
         <div style={{ marginBottom: '20px' }}>
           <h3 style={{ fontSize: '18px', color: '#333', margin: '0 0 10px 0' }}>Legenda de Variedades</h3>
           {varietiesLegend.length > 0 ? (
@@ -290,7 +446,6 @@ function MapPage({ safraId }: MapPageProps) {
           )}
         </div>
 
-        {/* Informações Gerais da Fazenda */}
         <div style={{ marginBottom: '20px' }}>
           <h3 style={{ fontSize: '18px', color: '#333', margin: '0 0 10px 0' }}>Informações Gerais</h3>
           <table style={{
@@ -363,7 +518,6 @@ function MapPage({ safraId }: MapPageProps) {
           </table>
         </div>
 
-        {/* Detalhes do Talhão Selecionado */}
         {selectedTalhao && (
           <div>
             <h3 style={{ fontSize: '18px', color: '#333', margin: '0 0 10px 0' }}>Detalhes do Talhão</h3>
@@ -472,6 +626,391 @@ function MapPage({ safraId }: MapPageProps) {
           </div>
         )}
       </div>
+
+      {showEditForm && formData && editingTalhao && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000,
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            padding: '20px',
+            borderRadius: '10px',
+            width: '500px',
+            maxHeight: '80vh',
+            overflowY: 'auto',
+            boxShadow: '0 4px 8px rgba(0, 0, 0, 0.2)',
+          }}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px',
+            }}>
+              <h3 style={{
+                fontSize: '20px',
+                color: '#333',
+                margin: 0,
+              }}>Editar Talhão</h3>
+              <button style={{
+                background: 'none',
+                border: 'none',
+                fontSize: '24px',
+                cursor: 'pointer',
+                color: '#666',
+              }} onClick={handleCancelEdit}>×</button>
+            </div>
+            <form onSubmit={handleUpdateTalhao}>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Talhão ID</label>
+                <input
+                  type="text"
+                  value={formData.TalhaoID ?? ''}
+                  onChange={(e) => setFormData({ ...formData, TalhaoID: e.target.value || null })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Nome</label>
+                <input
+                  type="text"
+                  value={formData.NOME}
+                  onChange={(e) => setFormData({ ...formData, NOME: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Tipo</label>
+                <select
+                  value={formData.TIPO}
+                  onChange={handleTipoChange}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                >
+                  {tipoOptions.map((option) => (
+                    <option key={option.name} value={option.name}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Área (ha)</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <input
+                    type="number"
+                    value={formData.AREA}
+                    onChange={(e) => setFormData({ ...formData, AREA: Number(e.target.value) })}
+                    step="0.01"
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: '1px solid #ccc',
+                      borderRadius: '5px',
+                      fontSize: '16px',
+                    }}
+                  />
+                  <span style={{ fontSize: '16px', color: '#666' }}>ha</span>
+                </div>
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Variedade</label>
+                <select
+                  value={formData.VARIEDADE}
+                  onChange={handleVariedadeChange}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                >
+                  {variedadeOptions.map((option) => (
+                    <option key={option.name} value={option.name}>
+                      {option.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Portaenxerto</label>
+                <input
+                  type="text"
+                  value={formData.PORTAENXERTO}
+                  onChange={(e) => setFormData({ ...formData, PORTAENXERTO: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Data de Plantio</label>
+                <input
+                  type="date"
+                  value={formData.DATA_DE_PLANTIO}
+                  onChange={handlePlantingDateChange}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Idade</label>
+                <input
+                  type="number"
+                  value={formData.IDADE}
+                  readOnly
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                    backgroundColor: '#f0f0f0',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Quantidade de Plantas</label>
+                <input
+                  type="number"
+                  value={formData.QTDE_PLANTAS}
+                  onChange={(e) => setFormData({ ...formData, QTDE_PLANTAS: Number(e.target.value) })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Falhas</label>
+                <input
+                  type="number"
+                  value={formData.FALHAS}
+                  onChange={(e) => setFormData({ ...formData, FALHAS: Number(e.target.value) })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Esp.</label>
+                <input
+                  type="text"
+                  value={formData.ESP}
+                  onChange={(e) => setFormData({ ...formData, ESP: String(e.target.value) })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Observações</label>
+                <textarea
+                  value={formData.OBS}
+                  onChange={(e) => setFormData({ ...formData, OBS: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                    minHeight: '100px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Cor</label>
+                <input
+                  type="color"
+                  value={formData.COR}
+                  onChange={(e) => setFormData({ ...formData, COR: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '5px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    height: '40px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Situação</label>
+                <select
+                  value={formData.ativo ? 'Ativo' : 'Inativo'}
+                  onChange={(e) => setFormData({ ...formData, ativo: e.target.value === 'Ativo' })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                  }}
+                >
+                  <option value="Ativo">Ativo</option>
+                  <option value="Inativo">Inativo</option>
+                </select>
+              </div>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px',
+              }}>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    transition: 'background-color 0.3s',
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#45a049'}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+                >
+                  Salvar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: '#f44336',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    transition: 'background-color 0.3s',
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#da190b'}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f44336'}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { toast } from 'react-toastify'; // Importar o toast
 
 // Interfaces definidas localmente com base nos dados retornados pelo backend
 interface Talhao {
@@ -11,10 +12,11 @@ interface Talhao {
   PORTAENXERTO: string;
   DATA_DE_PLANTIO: string;
   IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
+  FALHAS: number; // Renomeado de PRODUCAO_CAIXA
+  ESP: string; // Renomeado de PRODUCAO_HECTARE
   COR: string;
   qtde_plantas?: number;
+  OBS?: string; // Novo campo OBS
   ativo: boolean;
 }
 
@@ -27,10 +29,11 @@ interface TalhaoFormData {
   PORTAENXERTO: string;
   DATA_DE_PLANTIO: string;
   IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
+  FALHAS: number; // Renomeado de PRODUCAO_CAIXA
+  ESP: string; // Renomeado de PRODUCAO_HECTARE
   COR: string;
   QTDE_PLANTAS: number;
+  OBS: string; // Novo campo OBS
   ativo: boolean;
 }
 
@@ -49,7 +52,6 @@ function DataPage({ safraId }: DataPageProps) {
   const [filteredTalhoes, setFilteredTalhoes] = useState<Talhao[]>([]);
   const [formData, setFormData] = useState<TalhaoFormData | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string>('Talhões criados a partir de KMLs precisam ter suas informações completadas aqui.');
   const [tipoOptions, setTipoOptions] = useState<ConfigOption[]>([]);
   const [variedadeOptions, setVariedadeOptions] = useState<ConfigOption[]>([]);
   const [filterText, setFilterText] = useState<string>('');
@@ -73,7 +75,7 @@ function DataPage({ safraId }: DataPageProps) {
       setTipoOptions(tipoRecords);
       setVariedadeOptions(variedadeRecords);
     } catch (error) {
-      setMessage('Erro ao carregar configurações: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar configurações: ' + (error instanceof Error ? error.message : 'Desconhecido'));
       console.error('Erro ao carregar configurações:', error);
     }
   };
@@ -125,11 +127,12 @@ function DataPage({ safraId }: DataPageProps) {
         DATA_DE_PLANTIO: t.DATA_DE_PLANTIO,
         IDADE: t.IDADE,
         qtde_plantas: t.qtde_plantas,
+        OBS: t.OBS,
         ativo: t.ativo,
       })));
       setTalhoes(updatedTalhoes);
     } catch (error) {
-      setMessage('Erro ao carregar talhões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao carregar talhões: ' + (error instanceof Error ? error.message : 'Desconhecido'));
       console.error('Erro ao carregar talhões:', error);
     }
   };
@@ -154,6 +157,8 @@ function DataPage({ safraId }: DataPageProps) {
   useEffect(() => {
     fetchTalhoes();
     fetchConfigs();
+    // Exibir mensagem inicial como toast
+//    toast.info('Talhões criados a partir de KMLs precisam ter suas informações completadas aqui.');
   }, []);
 
   useEffect(() => {
@@ -253,10 +258,11 @@ function DataPage({ safraId }: DataPageProps) {
         PORTAENXERTO: formData.PORTAENXERTO,
         DATA_DE_PLANTIO: formData.DATA_DE_PLANTIO,
         IDADE: formData.IDADE,
-        PRODUCAO_CAIXA: formData.PRODUCAO_CAIXA,
-        PRODUCAO_HECTARE: formData.PRODUCAO_HECTARE,
+        FALHAS: formData.FALHAS, // Renomeado de PRODUCAO_CAIXA
+        ESP: formData.ESP, // Renomeado de PRODUCAO_HECTARE
         COR: formData.COR,
         qtde_plantas: formData.QTDE_PLANTAS,
+        OBS: formData.OBS, // Novo campo OBS
         ativo: formData.ativo,
       };
 
@@ -270,6 +276,7 @@ function DataPage({ safraId }: DataPageProps) {
           const errorData = await response.json();
           throw new Error(errorData.error || 'Erro ao atualizar talhão');
         }
+        toast.success('Talhão atualizado com sucesso!');
       } else {
         const response = await fetch(`${BASE_URL}/talhoes`, {
           method: 'POST',
@@ -280,6 +287,7 @@ function DataPage({ safraId }: DataPageProps) {
           const errorData = await response.json();
           throw new Error(errorData.error || 'Erro ao adicionar talhão');
         }
+        toast.success('Talhão adicionado com sucesso!');
       }
 
       setFormData(null);
@@ -288,9 +296,8 @@ function DataPage({ safraId }: DataPageProps) {
       setFilterType('Todos');
       setFilterStatus('Ativos');
       await fetchTalhoes();
-      setMessage(editingId ? 'Talhão atualizado com sucesso!' : 'Talhão adicionado com sucesso!');
     } catch (error) {
-      setMessage('Erro ao salvar talhão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao salvar talhão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
@@ -304,15 +311,15 @@ function DataPage({ safraId }: DataPageProps) {
       PORTAENXERTO: talhao.PORTAENXERTO,
       DATA_DE_PLANTIO: talhao.DATA_DE_PLANTIO,
       IDADE: calculateAge(talhao.DATA_DE_PLANTIO),
-      PRODUCAO_CAIXA: talhao.PRODUCAO_CAIXA,
-      PRODUCAO_HECTARE: talhao.PRODUCAO_HECTARE,
+      FALHAS: talhao.FALHAS, // Renomeado de PRODUCAO_CAIXA
+      ESP: talhao.ESP, // Renomeado de PRODUCAO_HECTARE
       COR: talhao.COR,
       QTDE_PLANTAS: talhao.qtde_plantas || 0,
+      OBS: talhao.OBS || '', // Novo campo OBS
       ativo: talhao.ativo,
     };
     setFormData(newFormData);
     setEditingId(talhao.id);
-    setMessage('');
   };
 
   const handleDelete = async (id: string) => {
@@ -323,16 +330,15 @@ function DataPage({ safraId }: DataPageProps) {
       setFilterType('Todos');
       setFilterStatus('Ativos');
       await fetchTalhoes();
-      setMessage('Talhão excluído com sucesso!');
+      toast.success('Talhão excluído com sucesso!');
     } catch (error) {
-      setMessage('Erro ao excluir talhão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
+      toast.error('Erro ao excluir talhão: ' + (error instanceof Error ? error.message : 'Desconhecido'));
     }
   };
 
   const handleCancel = () => {
     setFormData(null);
     setEditingId(null);
-    setMessage('');
   };
 
   const handlePlantingDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -421,10 +427,11 @@ function DataPage({ safraId }: DataPageProps) {
                 PORTAENXERTO: '',
                 DATA_DE_PLANTIO: '',
                 IDADE: 0,
-                PRODUCAO_CAIXA: 0,
-                PRODUCAO_HECTARE: 0,
+                FALHAS: 0, // Renomeado de PRODUCAO_CAIXA
+                ESP: '', // Renomeado de PRODUCAO_HECTARE
                 COR: tipoOptions[0]?.default_color || '#00FF00',
                 QTDE_PLANTAS: 0,
+                OBS: '', // Novo campo OBS
                 ativo: true,
               })}
               style={{
@@ -445,20 +452,6 @@ function DataPage({ safraId }: DataPageProps) {
           )}
         </div>
       </div>
-
-      {message && (
-        <p style={{
-          padding: '10px',
-          backgroundColor: message.includes('Erro') ? '#f8d7da' : '#d4edda',
-          color: message.includes('Erro') ? '#721c24' : '#155724',
-          border: `1px solid ${message.includes('Erro') ? '#f5c6cb' : '#c3e6cb'}`,
-          borderRadius: '5px',
-          marginBottom: '20px',
-          textAlign: 'center',
-        }}>
-          {message}
-        </p>
-      )}
 
       {formData && (
         <div style={{
@@ -703,11 +696,11 @@ function DataPage({ safraId }: DataPageProps) {
                   fontSize: '12px',
                   color: '#666',
                   marginBottom: '5px',
-                }}>Produção Caixa</label>
+                }}>Falhas</label>
                 <input
                   type="number"
-                  value={formData.PRODUCAO_CAIXA}
-                  onChange={(e) => setFormData({ ...formData, PRODUCAO_CAIXA: Number(e.target.value) })}
+                  value={formData.FALHAS}
+                  onChange={(e) => setFormData({ ...formData, FALHAS: Number(e.target.value) })}
                   style={{
                     width: '100%',
                     padding: '10px',
@@ -723,17 +716,37 @@ function DataPage({ safraId }: DataPageProps) {
                   fontSize: '12px',
                   color: '#666',
                   marginBottom: '5px',
-                }}>Produção Hectare</label>
+                }}>Esp.</label>
                 <input
-                  type="number"
-                  value={formData.PRODUCAO_HECTARE}
-                  onChange={(e) => setFormData({ ...formData, PRODUCAO_HECTARE: Number(e.target.value) })}
+                  type="text"
+                  value={formData.ESP}
+                  onChange={(e) => setFormData({ ...formData, ESP: String(e.target.value) })}
                   style={{
                     width: '100%',
                     padding: '10px',
                     border: '1px solid #ccc',
                     borderRadius: '5px',
                     fontSize: '16px',
+                  }}
+                />
+              </div>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  color: '#666',
+                  marginBottom: '5px',
+                }}>Observações</label>
+                <textarea
+                  value={formData.OBS}
+                  onChange={(e) => setFormData({ ...formData, OBS: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    border: '1px solid #ccc',
+                    borderRadius: '5px',
+                    fontSize: '16px',
+                    minHeight: '100px',
                   }}
                 />
               </div>
@@ -1039,6 +1052,24 @@ function DataPage({ safraId }: DataPageProps) {
                 fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
+              }}>Falhas</th>
+              <th style={{
+                padding: '15px',
+                backgroundColor: '#f4f4f4',
+                color: '#333',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                textAlign: 'left',
+                borderBottom: '1px solid #ddd',
+              }}>Esp.</th>
+              <th style={{
+                padding: '15px',
+                backgroundColor: '#f4f4f4',
+                color: '#333',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                textAlign: 'left',
+                borderBottom: '1px solid #ddd',
               }}>Produção Caixa (Safra)</th>
               <th style={{
                 padding: '15px',
@@ -1075,6 +1106,15 @@ function DataPage({ safraId }: DataPageProps) {
                 fontSize: '12px',
                 textAlign: 'left',
                 borderBottom: '1px solid #ddd',
+              }}>Observações</th>
+              <th style={{
+                padding: '15px',
+                backgroundColor: '#f4f4f4',
+                color: '#333',
+                fontWeight: 'bold',
+                fontSize: '12px',
+                textAlign: 'left',
+                borderBottom: '1px solid #ddd',
               }}>Ações</th>
             </tr>
           </thead>
@@ -1095,6 +1135,8 @@ function DataPage({ safraId }: DataPageProps) {
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{formatBrazilianDate(talhao.DATA_DE_PLANTIO)}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.IDADE}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.qtde_plantas ?? 'N/A'}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.FALHAS}</td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>{talhao.ESP}</td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
                   {producaoCaixas[talhao.id]?.toFixed(2) ?? '0.00'}
                 </td>
@@ -1108,6 +1150,9 @@ function DataPage({ safraId }: DataPageProps) {
                 </td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
                   {talhao.ativo ? 'Ativo' : 'Inativo'}
+                </td>
+                <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px' }}>
+                  {talhao.OBS || '-'}
                 </td>
                 <td style={{ padding: '15px', borderBottom: '1px solid #ddd', display: 'flex', gap: '10px' }}>
                   <div style={{ position: 'relative' }}>

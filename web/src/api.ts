@@ -24,11 +24,12 @@ export interface Talhao {
   PORTAENXERTO: string;
   DATA_DE_PLANTIO: string;
   IDADE: number;
-  PRODUCAO_CAIXA: number;
-  PRODUCAO_HECTARE: number;
+  FALHAS: number;
+  ESP: number;
   COR: string;
   qtde_plantas?: number;
   coordinates?: string; // Nova propriedade para as coordenadas
+  OBS?: string;
 }
 
 export interface ConfigOption {

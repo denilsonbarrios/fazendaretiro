@@ -1,5 +1,7 @@
 import { useState, useEffect, Suspense, lazy } from 'react';
 import './styles/main.scss';
+import { ToastContainer } from 'react-toastify'; // Importar o ToastContainer
+import 'react-toastify/dist/ReactToastify.css'; // Importar os estilos padrão do Toastify
 
 // Carregar componentes de forma assíncrona
 const MapPage = lazy(() => import('./components/MapPage'));
@@ -206,6 +208,20 @@ export default function App() {
           {activeTab === 'config' && <ConfigPage onSafraChange={fetchSafras} />}
         </Suspense>
       </div>
+
+      {/* Adicionar o ToastContainer para exibir notificações */}
+      <ToastContainer
+        position="top-right"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+      />
     </div>
   );
 }

@@ -50,6 +50,13 @@ const columnExists = async (table: string, column: string): Promise<boolean> => 
   return columns.some((col) => col.name === column);
 };
 
+// Função para verificar se uma tabela existe
+const tableExists = async (table: string): Promise<boolean> => {
+  const query = `SELECT name FROM sqlite_master WHERE type='table' AND name=?`;
+  const result = await fetchQuery<any>(query, [table]);
+  return result.length > 0;
+};
+
 // Função para inicializar as tabelas de forma assíncrona e realizar migrações
 export async function initializeDatabase(): Promise<void> {
   try {
@@ -84,12 +91,13 @@ export async function initializeDatabase(): Promise<void> {
         PORTAENXERTO TEXT,
         DATA_DE_PLANTIO TEXT,
         IDADE INTEGER,
-        PRODUCAO_CAIXA INTEGER,
-        PRODUCAO_HECTARE INTEGER,
+        FALHAS INTEGER,
+        ESP TEXT,
         COR TEXT,
         qtde_plantas INTEGER,
         coordinates TEXT,
-        ativo INTEGER DEFAULT 1 -- Novo campo com valor padrão 1 (Ativo)
+        ativo INTEGER DEFAULT 1,
+        OBS TEXT
       )
     `);
 
@@ -131,14 +139,15 @@ export async function initializeDatabase(): Promise<void> {
     `);
 
     // Verificar e migrar a tabela carregamentos
-    const tableExists = await fetchQuery<any>("SELECT name FROM sqlite_master WHERE type='table' AND name='carregamentos'", []);
-    if (tableExists.length > 0) {
+    const carregamentosTableExists = await tableExists('carregamentos');
+    if (carregamentosTableExists) {
       // Tabela já existe, realizar migrações
       const hasTalhaoId = await columnExists('carregamentos', 'talhao_id');
       const hasTalhao = await columnExists('carregamentos', 'talhao');
       const hasTalhaoN = await columnExists('carregamentos', 'talhao_n');
       const hasSemanaColheita = await columnExists('carregamentos', 'semana_colheita');
       const hasMedia = await columnExists('carregamentos', 'media');
+      const hasTotal = await columnExists('carregamentos', 'total');
 
       // Adicionar colunas que podem estar faltando
       if (!hasTalhaoId) {
@@ -151,8 +160,16 @@ export async function initializeDatabase(): Promise<void> {
         console.log('Adicionado campo semana_colheita à tabela carregamentos');
       }
 
-      if (hasTalhao || hasTalhaoN || hasMedia) {
-        // Criar uma tabela temporária com a nova estrutura (sem o campo media)
+      // Verificar se a tabela precisa ser migrada (remover talhao, talhao_n, media, total, ajustar talhao_id e semana_colheita)
+      if (hasTalhao || hasTalhaoN || hasMedia || hasTotal) {
+        // Verificar se a tabela temporária existe e dropar se necessário
+        const carregamentosTempExists = await tableExists('carregamentos_temp');
+        if (carregamentosTempExists) {
+          await runQuery(`DROP TABLE carregamentos_temp`);
+          console.log('Tabela temporária carregamentos_temp existente foi removida para nova migração');
+        }
+
+        // Criar uma tabela temporária com a nova estrutura (sem os campos media e total)
         await runQuery(`
           CREATE TABLE carregamentos_temp (
             id TEXT PRIMARY KEY,
@@ -163,28 +180,26 @@ export async function initializeDatabase(): Promise<void> {
             motorista TEXT,
             placa TEXT,
             qte_caixa REAL,
-            total REAL,
             semana INTEGER,
             semana_colheita INTEGER,
             safra_id TEXT NOT NULL
           )
         `);
 
-        // Copiar os dados da tabela antiga para a nova (usando talhao como talhao_id temporariamente)
+        // Copiar os dados da tabela antiga para a nova (usando talhao_id diretamente)
         await runQuery(`
           INSERT INTO carregamentos_temp (
-            id, data, talhao_id, qtde_plantas, variedade, motorista, placa, qte_caixa, total, semana, semana_colheita, safra_id
+            id, data, talhao_id, qtde_plantas, variedade, motorista, placa, qte_caixa, semana, semana_colheita, safra_id
           )
           SELECT 
             id, 
             data, 
-            COALESCE(talhao, '') AS talhao_id, 
+            talhao_id, 
             qtde_plantas, 
             variedade, 
             motorista, 
             placa, 
-            qte_caixa, 
-            total, 
+            qte_caixa,
             semana, 
             semana_colheita, 
             safra_id
@@ -197,10 +212,10 @@ export async function initializeDatabase(): Promise<void> {
         // Renomear a tabela temporária para o nome original
         await runQuery(`ALTER TABLE carregamentos_temp RENAME TO carregamentos`);
 
-        console.log('Migração da tabela carregamentos concluída: talhao, talhao_n e media removidos, talhao_id e semana_colheita adicionados');
+        console.log('Migração da tabela carregamentos concluída: talhao, talhao_n, media e total removidos, talhao_id e semana_colheita ajustados');
       }
     } else {
-      // Tabela não existe, criar com a nova estrutura (sem o campo media)
+      // Tabela não existe, criar com a nova estrutura (sem os campos media e total)
       await runQuery(`
         CREATE TABLE carregamentos (
           id TEXT PRIMARY KEY,
@@ -211,7 +226,6 @@ export async function initializeDatabase(): Promise<void> {
           motorista TEXT,
           placa TEXT,
           qte_caixa REAL,
-          total REAL,
           semana INTEGER,
           semana_colheita INTEGER,
           safra_id TEXT NOT NULL
