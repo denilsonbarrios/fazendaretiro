@@ -2,21 +2,87 @@ import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
 import fs from 'fs/promises';
+import fsSync from 'fs';
+import path from 'path';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 import { parseKML } from './kmlParser';
-import { initializeDatabase, generateId, runQuery, fetchQuery } from './db';
 import type { FeatureCollection, Polygon, MultiPolygon } from 'geojson';
+
+// Carregar variáveis de ambiente
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Configurar o multer para salvar arquivos no diretório 'uploads/'
-const upload = multer({ dest: 'uploads/' });
+// Configurar Supabase (apenas em produção)
+let supabase: any = null;
+if (IS_PRODUCTION && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+  supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+  console.log('✅ Supabase configurado para produção');
+} else if (IS_PRODUCTION) {
+  console.error('❌ SUPABASE_URL ou SUPABASE_SERVICE_KEY não configurados!');
+}
+
+// Importar funções do DB apenas em desenvolvimento
+let initializeDatabase: any;
+let generateId: any;
+let runQuery: any;
+let fetchQuery: any;
+
+if (!IS_PRODUCTION) {
+  const dbModule = require('./db');
+  initializeDatabase = dbModule.initializeDatabase;
+  generateId = dbModule.generateId;
+  runQuery = dbModule.runQuery;
+  fetchQuery = dbModule.fetchQuery;
+} else {
+  // Usar módulo vazio em produção
+  const dbProdModule = require('./db.prod');
+  initializeDatabase = dbProdModule.initializeDatabase;
+  generateId = dbProdModule.generateId;
+  runQuery = dbProdModule.runQuery;
+  fetchQuery = dbProdModule.fetchQuery;
+}
+
+// Configurar o multer para usar memória (compatível com serverless)
+const upload = multer({ storage: multer.memoryStorage() });
+
+// Lista de origens permitidas
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5000',
+  'http://localhost:4173',
+  // Adicionar URLs de produção quando deployar:
+  // 'https://fazendaretiro.vercel.app',
+  // 'https://seu-dominio-custom.com',
+];
 
 // Enable CORS for requests from the frontend origin
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5000', 'http://localhost:4173'], // Permitir frontend em portas diferentes
+  origin: function (origin, callback) {
+    // Permitir requisições sem origin (mobile apps, curl, etc)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`CORS blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
 
 // Middleware para parsing de JSON
@@ -32,6 +98,205 @@ const asyncHandler = (
     res.status(500).json({ error: 'Internal Server Error', details: errorMessage });
   });
 };
+
+// Middleware de autenticação JWT
+const authenticateToken = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+
+  if (!token) {
+    res.status(401).json({ error: 'Token não fornecido' });
+    return;
+  }
+
+  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+    if (err) {
+      res.status(403).json({ error: 'Token inválido ou expirado' });
+      return;
+    }
+    (req as any).user = user;
+    next();
+  });
+};
+
+// ENDPOINTS DE AUTENTICAÇÃO
+
+// Endpoint para registrar novo usuário (protegido por palavra-chave)
+app.post(
+  '/auth/register',
+  asyncHandler(async (req, res, next) => {
+    const { username, password, nome, registrationKey } = req.body;
+
+    // Validar campos obrigatórios
+    if (!username || !password || !nome || !registrationKey) {
+      res.status(400).json({ error: 'Username, password, nome e chave de registro são obrigatórios' });
+      return;
+    }
+
+    // Verificar palavra-chave de registro
+    const REGISTRATION_KEY = process.env.REGISTRATION_KEY || 'fazendaretiro2025';
+    if (registrationKey !== REGISTRATION_KEY) {
+      res.status(403).json({ error: 'Chave de registro inválida. Entre em contato com o administrador.' });
+      return;
+    }
+
+    if (IS_PRODUCTION && supabase) {
+      // Usar Supabase em produção
+      const { data: existingUsers } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', username);
+
+      if (existingUsers && existingUsers.length > 0) {
+        res.status(409).json({ error: 'Usuário já existe' });
+        return;
+      }
+
+      const password_hash = await bcrypt.hash(password, 10);
+      const userId = generateId();
+      const created_at = Math.floor(Date.now() / 1000);
+
+      const { error } = await supabase
+        .from('users')
+        .insert([{ id: userId, username, password_hash, nome, created_at }]);
+
+      if (error) {
+        console.error('Erro ao criar usuário no Supabase:', error);
+        res.status(500).json({ error: 'Erro ao criar usuário' });
+        return;
+      }
+
+      console.log(`Usuário registrado: ${username} (ID: ${userId})`);
+      res.status(201).json({ message: 'Usuário registrado com sucesso', id: userId });
+    } else {
+      // Usar SQLite em desenvolvimento
+      const existingUser = await fetchQuery<any>('SELECT id FROM users WHERE username = ?', [username]);
+      if (existingUser.length > 0) {
+        res.status(409).json({ error: 'Usuário já existe' });
+        return;
+      }
+
+      const password_hash = await bcrypt.hash(password, 10);
+      const userId = generateId();
+
+      await runQuery(
+        'INSERT INTO users (id, username, password_hash, nome) VALUES (?, ?, ?, ?)',
+        [userId, username, password_hash, nome]
+      );
+
+      console.log(`Usuário registrado: ${username} (ID: ${userId})`);
+      res.status(201).json({ message: 'Usuário registrado com sucesso', id: userId });
+    }
+  })
+);
+
+// Endpoint para login
+app.post(
+  '/auth/login',
+  asyncHandler(async (req, res, next) => {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      res.status(400).json({ error: 'Username e password são obrigatórios' });
+      return;
+    }
+
+    if (IS_PRODUCTION && supabase) {
+      // Usar Supabase em produção
+      const { data: users } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', username);
+
+      if (!users || users.length === 0) {
+        res.status(401).json({ error: 'Credenciais inválidas' });
+        return;
+      }
+
+      const user = users[0];
+
+      // Verificar senha
+      const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      if (!isPasswordValid) {
+        res.status(401).json({ error: 'Credenciais inválidas' });
+        return;
+      }
+
+      // Gerar token JWT
+      const token = jwt.sign(
+        { id: user.id, username: user.username, nome: user.nome },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      console.log(`Login bem-sucedido: ${username}`);
+      res.status(200).json({
+        message: 'Login realizado com sucesso',
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          nome: user.nome
+        }
+      });
+    } else {
+      // Usar SQLite em desenvolvimento
+      const users = await fetchQuery<any>('SELECT * FROM users WHERE username = ?', [username]);
+      if (users.length === 0) {
+        res.status(401).json({ error: 'Credenciais inválidas' });
+        return;
+      }
+
+      const user = users[0];
+
+      // Verificar senha
+      const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      if (!isPasswordValid) {
+        res.status(401).json({ error: 'Credenciais inválidas' });
+        return;
+      }
+
+      // Gerar token JWT
+      const token = jwt.sign(
+        { id: user.id, username: user.username, nome: user.nome },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      console.log(`Login bem-sucedido: ${username}`);
+      res.status(200).json({
+        message: 'Login realizado com sucesso',
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          nome: user.nome
+        }
+      });
+    }
+  })
+);
+
+// Endpoint para verificar token (útil para validar sessão)
+app.get(
+  '/auth/verify',
+  authenticateToken,
+  asyncHandler(async (req, res, next) => {
+    const user = (req as any).user;
+    res.status(200).json({
+      valid: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        nome: user.nome
+      }
+    });
+  })
+);
+
+// ENDPOINTS PROTEGIDOS (requerem autenticação)
+// Aplicar middleware de autenticação para todas as rotas abaixo
+app.use(authenticateToken);
 
 // Função para calcular a semana do ano (ISO 8601)
 const getWeekOfYear = (date: Date): number => {
@@ -109,11 +374,9 @@ app.post(
       console.log('No features found in KML');
       res.status(400).json({ error: 'No features found in KML file' });
       return;
-    }
-
-    // Buscar todos os talhões existentes no banco de dados
-    const existingTalhoes = await fetchQuery<any>('SELECT * FROM talhoes', []);
-    console.log(`Total de talhões existentes no banco: ${existingTalhoes.length}`);
+    }    // Buscar todos os talhões KML existentes no banco de dados
+    const existingTalhoesKml = await fetchQuery<any>('SELECT * FROM talhoes_kml', []);
+    console.log(`Total de talhões KML existentes no banco: ${existingTalhoesKml.length}`);
 
     const kmlId = generateId();
     const kmlSql = `
@@ -121,98 +384,130 @@ app.post(
       VALUES (?, ?, ?)
     `;
     await runQuery(kmlSql, [kmlId, req.file.originalname, kmlContent]);
-    console.log('KML saved to database:', kmlId);
+    console.log('KML saved to database:', kmlId);    const processedPlacemarkNames = new Set<string>();
+    let createdKmlTalhoes = 0;
+    let updatedKmlTalhoes = 0;
 
-    const processedTalhaoIds = new Set<string>();
-
+    // Primeiro, coletar todos os placemark names do novo arquivo KML
+    const newPlacemarkNames = new Set<string>();
     for (const feature of geojson.features) {
       if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
-        const talhaoId = feature.properties?.name || feature.properties?.Name;
-        if (!talhaoId) {
+        const placemarkName = feature.properties?.name || feature.properties?.Name;
+        if (placemarkName) {
+          newPlacemarkNames.add(placemarkName);
+        }
+      }
+    }
+
+    // Processar features do novo KML
+    for (const feature of geojson.features) {
+      if (feature.geometry.type === 'Polygon' || feature.geometry.type === 'MultiPolygon') {
+        const placemarkName = feature.properties?.name || feature.properties?.Name;
+        if (!placemarkName) {
           console.log('Feature ignorada: nome do placemark não encontrado');
           continue;
         }
 
-        if (processedTalhaoIds.has(talhaoId)) {
-          console.log(`Placemark ${talhaoId} já processado, ignorando duplicata`);
+        if (processedPlacemarkNames.has(placemarkName)) {
+          console.log(`Placemark ${placemarkName} já processado, ignorando duplicata`);
           continue;
         }
 
-        console.log(`Processando placemark: ${talhaoId}`);
+        console.log(`Processando placemark: ${placemarkName}`);
         const geometry = feature.geometry as Polygon | MultiPolygon;
         const coordinates = geometry.coordinates;
 
-        // Verificar se já existe um talhão com o mesmo TalhaoID ou NOME
-        const existingTalhao = existingTalhoes.find(
-          (talhao: any) => talhao.TalhaoID === talhaoId || talhao.NOME === talhaoId
+        // Verificar se já existe um talhao_kml com o mesmo placemark_name
+        const existingTalhaoKml = existingTalhoesKml.find(
+          (talhaoKml: any) => talhaoKml.placemark_name === placemarkName
         );
 
-        if (existingTalhao) {
-          // Talhão já existe, atualizar apenas as coordenadas
+        if (existingTalhaoKml) {
+          // Talhão KML já existe, atualizar apenas as coordenadas
           const updateSql = `
-            UPDATE talhoes
-            SET coordinates = ?
+            UPDATE talhoes_kml
+            SET coordinates = ?, geometry_type = ?, kml_file_id = ?
             WHERE id = ?
           `;
-          await runQuery(updateSql, [JSON.stringify(coordinates), existingTalhao.id]);
-          console.log(`Coordenadas do talhão ${existingTalhao.NOME} (ID: ${existingTalhao.id}) atualizadas.`);
-        } else {
-          // Criar um novo talhão
-          const talhaoIdGenerated = generateId();
-          const talhaoSql = `
-            INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, FALHAS, ESP, COR, qtde_plantas, coordinates, OBS, ativo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `;
-          const talhao = {
-            TalhaoID: talhaoId,
-            TIPO: 'Talhao',
-            NOME: talhaoId,
-            AREA: '0 ha',
-            VARIEDADE: '',
-            PORTAENXERTO: '',
-            DATA_DE_PLANTIO: '',
-            IDADE: 0,
-            FALHAS: 0,
-            ESP: 0,
-            COR: '#00FF00',
-            qtde_plantas: 0,
-            coordinates: JSON.stringify(coordinates),
-            OBS: '',
-            ativo: 1,
-          };
-          await runQuery(talhaoSql, [
-            talhaoIdGenerated,
-            talhao.TalhaoID,
-            talhao.TIPO,
-            talhao.NOME,
-            talhao.AREA,
-            talhao.VARIEDADE,
-            talhao.PORTAENXERTO,
-            talhao.DATA_DE_PLANTIO,
-            talhao.IDADE,
-            talhao.FALHAS,
-            talhao.ESP,
-            talhao.COR,
-            talhao.qtde_plantas || 0,
-            talhao.coordinates,
-            talhao.OBS,
-            talhao.ativo,
+          await runQuery(updateSql, [
+            JSON.stringify(coordinates), 
+            geometry.type, 
+            kmlId, 
+            existingTalhaoKml.id
           ]);
-          console.log(`Novo talhão criado: ${talhaoId} (ID: ${talhaoIdGenerated})`);
+          console.log(`Coordenadas do talhão KML ${placemarkName} (ID: ${existingTalhaoKml.id}) atualizadas.`);
+          updatedKmlTalhoes++;
+        } else {
+          // Criar um novo talhão KML
+          const talhaoKmlId = generateId();
+          const talhaoKmlSql = `
+            INSERT INTO talhoes_kml (id, placemark_name, coordinates, geometry_type, kml_file_id, ativo)
+            VALUES (?, ?, ?, ?, ?, ?)
+          `;
+          await runQuery(talhaoKmlSql, [
+            talhaoKmlId,
+            placemarkName,
+            JSON.stringify(coordinates),
+            geometry.type,
+            kmlId,
+            1
+          ]);
+          console.log(`Novo talhão KML criado: ${placemarkName} (ID: ${talhaoKmlId})`);
+          createdKmlTalhoes++;
         }
 
-        processedTalhaoIds.add(talhaoId);
+        processedPlacemarkNames.add(placemarkName);
       } else {
         console.log(`Feature ignorada: geometria não é Polygon ou MultiPolygon (${feature.geometry.type})`);
       }
     }
 
-    await fs.unlink(filePath);
+    // Verificar talhões KML que existiam antes mas não estão no novo arquivo
+    let removedKmlTalhoes = 0;
+    let unlinkedTalhoes = 0;
+    
+    for (const existingTalhaoKml of existingTalhoesKml) {
+      if (!newPlacemarkNames.has(existingTalhaoKml.placemark_name)) {
+        console.log(`Talhão KML ${existingTalhaoKml.placemark_name} não encontrado no novo arquivo, removendo...`);
+        
+        // Primeiro, desfazer vinculações com talhões
+        const vinculatedTalhoes = await fetchQuery<any>(
+          'SELECT id, NOME FROM talhoes WHERE talhao_kml_id = ?', 
+          [existingTalhaoKml.id]
+        );
+        
+        if (vinculatedTalhoes.length > 0) {
+          console.log(`Desfazendo vinculação de ${vinculatedTalhoes.length} talhão(ões) com o talhão KML ${existingTalhaoKml.placemark_name}`);
+          await runQuery(
+            'UPDATE talhoes SET talhao_kml_id = NULL WHERE talhao_kml_id = ?',
+            [existingTalhaoKml.id]
+          );
+          unlinkedTalhoes += vinculatedTalhoes.length;
+          
+          for (const talhao of vinculatedTalhoes) {
+            console.log(`Talhão "${talhao.NOME}" (ID: ${talhao.id}) desvinculado do talhão KML removido`);
+          }
+        }
+        
+        // Remover o talhão KML
+        await runQuery('DELETE FROM talhoes_kml WHERE id = ?', [existingTalhaoKml.id]);
+        console.log(`Talhão KML ${existingTalhaoKml.placemark_name} (ID: ${existingTalhaoKml.id}) removido`);
+        removedKmlTalhoes++;
+      }
+    }    await fs.unlink(filePath);
     console.log('Temporary file deleted:', filePath);
 
+    const message = `KML processado com sucesso. ${createdKmlTalhoes} novos talhões KML criados, ${updatedKmlTalhoes} atualizados.` +
+      (removedKmlTalhoes > 0 ? ` ${removedKmlTalhoes} talhões KML removidos (não presentes no novo arquivo).` : '') +
+      (unlinkedTalhoes > 0 ? ` ${unlinkedTalhoes} talhão(ões) desvinculado(s).` : '');
+
     res.status(200).json({ 
-      message: 'KML uploaded and processed successfully. Existing talhões updated, new talhões created as needed.',
-      kmlId 
+      message,
+      kmlId,
+      createdKmlTalhoes,
+      updatedKmlTalhoes,
+      removedKmlTalhoes,
+      unlinkedTalhoes
     });
   })
 );
@@ -307,6 +602,39 @@ app.get(
   })
 );
 
+// Endpoint para listar talhões KML
+app.get(
+  '/talhoes_kml',
+  asyncHandler(async (req, res, next) => {
+    const talhoesKml = await fetchQuery<any>('SELECT * FROM talhoes_kml ORDER BY placemark_name', []);
+    res.status(200).json(talhoesKml);
+  })
+);
+
+// Endpoint para buscar talhões não vinculados a talhões KML
+app.get(
+  '/talhoes/sem-kml',
+  asyncHandler(async (req, res, next) => {
+    const talhoesSemKml = await fetchQuery<any>('SELECT * FROM talhoes WHERE talhao_kml_id IS NULL ORDER BY NOME', []);
+    res.status(200).json(talhoesSemKml);
+  })
+);
+
+// Endpoint para buscar talhões KML não vinculados a talhões
+app.get(
+  '/talhoes_kml/sem-vinculo',
+  asyncHandler(async (req, res, next) => {
+    const talhoesKmlSemVinculo = await fetchQuery<any>(
+      `SELECT tk.* FROM talhoes_kml tk 
+       LEFT JOIN talhoes t ON t.talhao_kml_id = tk.id 
+       WHERE t.id IS NULL AND tk.ativo = 1
+       ORDER BY tk.placemark_name`, 
+      []
+    );
+    res.status(200).json(talhoesKmlSemVinculo);
+  })
+);
+
 // Endpoint para listar talhões
 app.get(
   '/talhoes',
@@ -358,90 +686,73 @@ app.get(
   asyncHandler(async (req, res, next) => {
     const { id } = req.params;
 
-    const talhao = await fetchQuery<any>('SELECT TalhaoID, NOME, ativo FROM talhoes WHERE id = ?', [id]);
+    const talhao = await fetchQuery<any>(
+      'SELECT t.TalhaoID, t.NOME, t.ativo, t.talhao_kml_id FROM talhoes t WHERE t.id = ?', 
+      [id]
+    );
     if (!talhao || talhao.length === 0) {
       console.log(`Talhão não encontrado para ID: ${id}`);
       res.status(404).json({ error: 'Talhao not found' });
       return;
     }
 
-    const { TalhaoID, NOME, ativo } = talhao[0];
-    const identifier = TalhaoID || NOME;
-    if (!identifier) {
-      console.log(`Talhão ID: ${id} não possui TalhaoID ou NOME válido`);
-      res.status(400).json({ error: 'Talhao does not have a valid TalhaoID or NOME to match with KML' });
-      return;
-    }
+    const { TalhaoID, NOME, ativo, talhao_kml_id } = talhao[0];
 
     if (!ativo) {
-      console.log(`Talhão ID: ${id} (TalhaoID/NOME: ${identifier}) está inativo, não buscando coordenadas no KML`);
+      console.log(`Talhão ID: ${id} (NOME: ${NOME}) está inativo`);
       res.status(410).json({ 
-        error: `Talhão ${identifier} está inativo e não possui coordenadas associadas`,
-        suggestion: 'Este talhão não está mais em uso. Registros históricos podem estar disponíveis, mas coordenadas não serão buscadas.'
+        error: `Talhão ${NOME} está inativo`,
+        suggestion: 'Este talhão não está mais em uso.'
       });
       return;
     }
 
-    console.log(`Buscando KML para talhão ID: ${id}, identifier: ${identifier}`);
-
-    const kmlFiles = await fetchQuery<any>('SELECT content FROM kml_files ORDER BY ROWID DESC LIMIT 1', []);
-    if (!kmlFiles || kmlFiles.length === 0) {
-      console.log('Nenhum arquivo KML encontrado no banco de dados');
-      res.status(404).json({ error: 'No KML files found in the database' });
-      return;
+    // Se talhão tem referência direta para talhoes_kml
+    if (talhao_kml_id) {
+      const talhaoKml = await fetchQuery<any>(
+        'SELECT coordinates FROM talhoes_kml WHERE id = ? AND ativo = 1', 
+        [talhao_kml_id]
+      );
+      
+      if (talhaoKml && talhaoKml.length > 0) {
+        const coordinates = JSON.parse(talhaoKml[0].coordinates);
+        res.status(200).json({ coordinates });
+        return;
+      }
     }
 
-    const kmlContent = kmlFiles[0].content;
-    console.log(`KML encontrado, tamanho do conteúdo: ${kmlContent.length} caracteres`);
+    // Caso não tenha referência direta, tentar buscar por nome no talhoes_kml
+    const identifier = TalhaoID || NOME;
+    console.log(`Buscando talhão KML por nome para talhão ID: ${id}, identifier: ${identifier}`);
 
-    let geojson: FeatureCollection;
-    try {
-      geojson = parseKML(kmlContent);
-      console.log(`KML parseado com sucesso, número de features: ${geojson.features.length}`);
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error during KML parsing';
-      console.error('Failed to parse KML:', errorMessage);
-      res.status(400).json({ error: 'Failed to parse KML file', details: errorMessage });
-      return;
-    }
+    const talhaoKmlByName = await fetchQuery<any>(
+      'SELECT coordinates FROM talhoes_kml WHERE placemark_name = ? AND ativo = 1', 
+      [identifier]
+    );
 
-    const feature = geojson.features.find((f) => {
-      const featureName = f.properties?.name || f.properties?.Name;
-      const isMatch = featureName === identifier && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon');
-      console.log(`Verificando feature: name=${featureName}, type=${f.geometry.type}, match=${isMatch}`);
-      return isMatch;
-    });
-
-    if (!feature) {
-      console.log(`Nenhuma feature correspondente encontrada no KML para TalhaoID/NOME: ${identifier}`);
+    if (!talhaoKmlByName || talhaoKmlByName.length === 0) {
+      console.log(`Nenhum talhão KML encontrado para identifier: ${identifier}`);
       res.status(404).json({ 
-        error: `No matching feature found in KML for TalhaoID/NOME: ${identifier}`,
-        suggestion: 'Verifique se um arquivo KML com o talhão correspondente foi carregado e se o nome no KML corresponde ao TalhaoID ou NOME.'
+        error: `Coordenadas não encontradas para talhão: ${identifier}`,
+        suggestion: 'Verifique se um arquivo KML com o talhão correspondente foi carregado.'
       });
       return;
     }
 
-    const geometry = feature.geometry as Polygon | MultiPolygon;
-    if (!geometry.coordinates) {
-      console.log('Geometria inválida: coordenadas não encontradas');
-      res.status(500).json({ error: 'Unexpected geometry type: coordinates not found' });
-      return;
-    }
-
-    const coordinates = geometry.coordinates;
+    const coordinates = JSON.parse(talhaoKmlByName[0].coordinates);
     res.status(200).json({ coordinates });
   })
 );
 
-// Endpoint para atualizar apenas as coordenadas de um talhao
+// Endpoint para vincular um talhão a um talhão KML
 app.put(
-  '/talhoes/:id/coordinates',
+  '/talhoes/:id/link-kml',
   asyncHandler(async (req, res, next) => {
     const { id } = req.params;
-    const { coordinates } = req.body;
+    const { talhao_kml_id } = req.body;
 
-    if (!coordinates) {
-      res.status(400).json({ error: 'Missing required field: coordinates is required' });
+    if (!talhao_kml_id) {
+      res.status(400).json({ error: 'Missing required field: talhao_kml_id is required' });
       return;
     }
 
@@ -451,14 +762,21 @@ app.put(
       return;
     }
 
+    // Verificar se o talhao_kml_id existe
+    const talhaoKml = await fetchQuery<any>('SELECT * FROM talhoes_kml WHERE id = ?', [talhao_kml_id]);
+    if (!talhaoKml || talhaoKml.length === 0) {
+      res.status(404).json({ error: 'Talhao KML not found' });
+      return;
+    }
+
     const sql = `
       UPDATE talhoes
-      SET coordinates = ?
+      SET talhao_kml_id = ?
       WHERE id = ?
     `;
-    await runQuery(sql, [JSON.stringify(coordinates), id]);
-    console.log(`Coordenadas do talhão ${id} atualizadas:`, coordinates);
-    res.status(200).json({ message: 'Coordenadas do talhão atualizadas com sucesso' });
+    await runQuery(sql, [talhao_kml_id, id]);
+    console.log(`Talhão ${id} vinculado ao talhão KML ${talhao_kml_id}`);
+    res.status(200).json({ message: 'Talhão vinculado ao KML com sucesso' });
   })
 );
 
@@ -479,7 +797,7 @@ app.post(
       ESP,
       COR,
       qtde_plantas,
-      coordinates,
+      talhao_kml_id,
       OBS,
       ativo,
     } = req.body;
@@ -500,9 +818,18 @@ app.post(
       }
     }
 
+    // Verificar se talhao_kml_id existe, caso fornecido
+    if (talhao_kml_id) {
+      const talhaoKml = await fetchQuery<any>('SELECT id FROM talhoes_kml WHERE id = ?', [talhao_kml_id]);
+      if (!talhaoKml || talhaoKml.length === 0) {
+        res.status(404).json({ error: 'Talhao KML not found' });
+        return;
+      }
+    }
+
     const talhaoId = generateId();
     const sql = `
-      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, FALHAS, ESP, COR, qtde_plantas, coordinates, OBS, ativo)
+      INSERT INTO talhoes (id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, DATA_DE_PLANTIO, IDADE, FALHAS, ESP, COR, qtde_plantas, talhao_kml_id, OBS, ativo)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await runQuery(sql, [
@@ -517,9 +844,9 @@ app.post(
       IDADE || null,
       FALHAS || null,
       ESP || null,
-      COR || null,
+      COR || '#00FF00',
       qtde_plantas || null,
-      coordinates ? JSON.stringify(coordinates) : null,
+      talhao_kml_id || null,
       OBS || null,
       ativo !== undefined ? (ativo ? 1 : 0) : 1,
     ]);
@@ -528,7 +855,7 @@ app.post(
   })
 );
 
-// Endpoint para atualizar um talhao (sem atualizar coordinates)
+// Endpoint para atualizar um talhao (sem atualizar coordenadas)
 app.put(
   '/talhoes/:id',
   asyncHandler(async (req, res, next) => {
@@ -546,6 +873,7 @@ app.put(
       ESP,
       COR,
       qtde_plantas,
+      talhao_kml_id,
       OBS,
       ativo,
     } = req.body;
@@ -574,9 +902,18 @@ app.put(
       }
     }
 
+    // Verificar se talhao_kml_id existe, caso fornecido
+    if (talhao_kml_id && talhao_kml_id !== talhaoExistente.talhao_kml_id) {
+      const talhaoKml = await fetchQuery<any>('SELECT id FROM talhoes_kml WHERE id = ?', [talhao_kml_id]);
+      if (!talhaoKml || talhaoKml.length === 0) {
+        res.status(404).json({ error: 'Talhao KML not found' });
+        return;
+      }
+    }
+
     const sql = `
       UPDATE talhoes
-      SET TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, FALHAS = ?, ESP = ?, COR = ?, qtde_plantas = ?, OBS = ?, ativo = ?
+      SET TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, FALHAS = ?, ESP = ?, COR = ?, qtde_plantas = ?, talhao_kml_id = ?, OBS = ?, ativo = ?
       WHERE id = ?
     `;
     await runQuery(sql, [
@@ -592,6 +929,7 @@ app.put(
       ESP !== undefined ? ESP : talhaoExistente.ESP,
       COR !== undefined ? COR : talhaoExistente.COR,
       qtde_plantas !== undefined ? qtde_plantas : talhaoExistente.qtde_plantas,
+      talhao_kml_id !== undefined ? talhao_kml_id : talhaoExistente.talhao_kml_id,
       OBS !== undefined ? OBS : talhaoExistente.OBS,
       ativo !== undefined ? (ativo ? 1 : 0) : talhaoExistente.ativo,
       id,
@@ -1142,12 +1480,447 @@ app.delete(
   })
 );
 
+// ENDPOINTS TALHAO_SAFRA (CRUD por safra)
+
+// Listar todos os talhões, trazendo dados da base e sobrescrevendo pelos da safra quando houver, incluindo coordenadas do KML
+app.get(
+  '/talhao_safra',
+  asyncHandler(async (req, res, next) => {
+    const { safra_id } = req.query;
+    if (!safra_id) {
+      res.status(400).json({ error: 'Parâmetro safra_id é obrigatório' });
+      return;
+    }
+    // LEFT JOIN para trazer todos os talhões, mesmo sem vínculo na safra, incluindo coordenadas do KML
+    const sql = `
+      SELECT 
+        COALESCE(ts.id, t.id) as id,
+        t.id as talhao_id,
+        t.TalhaoID,
+        t.TIPO,
+        t.NOME as nome_talhao,
+        t.NOME,
+        COALESCE(ts.area, t.AREA) as AREA,
+        COALESCE(ts.variedade, t.VARIEDADE) as VARIEDADE,
+        COALESCE(ts.porta_enxerto, t.PORTAENXERTO) as PORTAENXERTO,
+        COALESCE(ts.data_de_plantio, t.DATA_DE_PLANTIO) as DATA_DE_PLANTIO,
+        COALESCE(ts.idade, t.IDADE) as IDADE,
+        COALESCE(ts.falhas, t.FALHAS) as FALHAS,
+        COALESCE(ts.esp, t.ESP) as ESP,
+        t.COR,
+        COALESCE(ts.qtde_plantas, t.qtde_plantas) as qtde_plantas,
+        tk.coordinates,
+        tk.placemark_name,
+        COALESCE(ts.obs, t.OBS) as OBS,
+        COALESCE(ts.ativo, t.ativo) as ativo
+      FROM talhoes t
+      LEFT JOIN talhao_safra ts ON ts.talhao_id = t.id AND ts.safra_id = ?
+      LEFT JOIN talhoes_kml tk ON tk.id = t.talhao_kml_id
+    `;
+    const talhoesSafra = await fetchQuery<any>(sql, [safra_id]);
+    res.status(200).json(talhoesSafra);
+  })
+);
+
+// Buscar um talhao_safra específico
+app.get(
+  '/talhao_safra/:id',
+  asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    const sql = `SELECT * FROM talhao_safra WHERE id = ?`;
+    const result = await fetchQuery<any>(sql, [id]);
+    if (!result || result.length === 0) {
+      res.status(404).json({ error: 'Talhão por safra não encontrado' });
+      return;
+    }
+    res.status(200).json(result[0]);
+  })
+);
+
+// Criar um novo talhao_safra
+app.post(
+  '/talhao_safra',
+  asyncHandler(async (req, res, next) => {
+    const {
+      talhao_id,
+      safra_id,
+      area,
+      variedade,
+      qtde_plantas,
+      porta_enxerto,
+      data_de_plantio,
+      idade,
+      falhas,
+      esp,
+      obs,
+      ativo
+    } = req.body;
+    if (!talhao_id || !safra_id) {
+      res.status(400).json({ error: 'Campos talhao_id e safra_id são obrigatórios' });
+      return;
+    }
+    const id = generateId();
+    const sql = `
+      INSERT INTO talhao_safra (id, talhao_id, safra_id, area, variedade, qtde_plantas, porta_enxerto, data_de_plantio, idade, falhas, esp, obs, ativo)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    await runQuery(sql, [
+      id,
+      talhao_id,
+      safra_id,
+      area || null,
+      variedade || null,
+      qtde_plantas || null,
+      porta_enxerto || null,
+      data_de_plantio || null,
+      idade || null,
+      falhas || null,
+      esp || null,
+      obs || null,
+      ativo !== undefined ? (ativo ? 1 : 0) : 1
+    ]);
+    res.status(201).json({ message: 'Talhão por safra criado com sucesso', id });
+  })
+);
+
+// Atualizar um talhao_safra existente
+app.put(
+  '/talhao_safra/:id',
+  asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    const {
+      area,
+      variedade,
+      qtde_plantas,
+      porta_enxerto,
+      data_de_plantio,
+      idade,
+      falhas,
+      esp,
+      obs,
+      ativo
+    } = req.body;
+    const sql = `
+      UPDATE talhao_safra
+      SET area = ?, variedade = ?, qtde_plantas = ?, porta_enxerto = ?, data_de_plantio = ?, idade = ?, falhas = ?, esp = ?, obs = ?, ativo = ?
+      WHERE id = ?
+    `;
+    await runQuery(sql, [
+      area || null,
+      variedade || null,
+      qtde_plantas || null,
+      porta_enxerto || null,
+      data_de_plantio || null,
+      idade || null,
+      falhas || null,
+      esp || null,
+      obs || null,
+      ativo !== undefined ? (ativo ? 1 : 0) : 1,
+      id
+    ]);
+    res.status(200).json({ message: 'Talhão por safra atualizado com sucesso' });
+  })
+);
+
+// Deletar um talhao_safra
+app.delete(
+  '/talhao_safra/:id',
+  asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    const sql = 'DELETE FROM talhao_safra WHERE id = ?';
+    await runQuery(sql, [id]);
+    res.status(200).json({ message: 'Talhão por safra deletado com sucesso' });
+  })
+);
+
+// Endpoint para importar talhões da base ou de outra safra para uma safra específica
+app.post(
+  '/talhao_safra/importar',
+  asyncHandler(async (req, res, next) => {
+    const { safra_id, origem } = req.body; // origem pode ser 'base' ou o id de outra safra
+    if (!safra_id) {
+      res.status(400).json({ error: 'safra_id é obrigatório' });
+      return;
+    }
+    let talhoesOrigem = [];
+    if (origem === 'base') {
+      talhoesOrigem = await fetchQuery<any>('SELECT * FROM talhoes', []);
+    } else if (origem) {
+      talhoesOrigem = await fetchQuery<any>(
+        'SELECT t.* FROM talhao_safra ts JOIN talhoes t ON ts.talhao_id = t.id WHERE ts.safra_id = ?',
+        [origem]
+      );
+    } else {
+      res.status(400).json({ error: 'origem inválida' });
+      return;
+    }
+    let count = 0;
+    for (const talhao of talhoesOrigem) {
+      // Verifica se já existe vínculo
+      const existe = await fetchQuery<any>(
+        'SELECT * FROM talhao_safra WHERE talhao_id = ? AND safra_id = ?',
+        [talhao.id, safra_id]
+      );
+      if (existe.length === 0) {
+        await runQuery(
+          `INSERT INTO talhao_safra (id, talhao_id, safra_id, area, variedade, qtde_plantas, porta_enxerto, data_de_plantio, idade, falhas, esp, obs, ativo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            generateId(),
+            talhao.id,
+            safra_id,
+            talhao.AREA || null,
+            talhao.VARIEDADE || null,
+            talhao.qtde_plantas || null,
+            talhao.PORTAENXERTO || null,
+            talhao.DATA_DE_PLANTIO || null,
+            talhao.IDADE || null,
+            talhao.FALHAS || null,
+            talhao.ESP || null,
+            talhao.OBS || null,
+            talhao.ativo !== undefined ? talhao.ativo : 1
+          ]
+        );
+        count++;
+      }
+    }
+    res.status(200).json({ message: `Importação concluída. ${count} talhões vinculados à safra.` });
+  })
+);
+
+// Endpoint para importar talhões base a partir do CSV
+app.post(
+  '/import-talhoes-csv',
+  asyncHandler(async (req, res, next) => {
+    try {
+      const csvPath = path.join(__dirname, '..', 'talhoes_export_2025-06-20_050444.csv');
+        if (!fsSync.existsSync(csvPath)) {
+        res.status(404).json({ error: 'Arquivo CSV não encontrado' });
+        return;
+      }
+
+      const csvContent = fsSync.readFileSync(csvPath, 'utf-8');
+      const lines = csvContent.split('\n').filter((line: string) => line.trim() !== '');
+      const headers = lines[0].split(',');
+      
+      let importedCount = 0;
+      let updatedCount = 0;
+      const errors: string[] = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        try {
+          const values = lines[i].split(',');
+          
+          // Parse dos dados do CSV
+          const talhaoData = {
+            id: values[0]?.trim() || generateId(),
+            TalhaoID: values[1]?.trim() || null,
+            TIPO: values[2]?.trim() || 'TALHAO',
+            NOME: values[3]?.trim() || '',
+            AREA: values[4]?.trim() || '0 ha',
+            VARIEDADE: values[5]?.trim() || '',
+            PORTAENXERTO: values[6]?.trim() || '',
+            DATA_DE_PLANTIO: values[7]?.trim() || '',
+            IDADE: parseInt(values[8]?.trim()) || 0,
+            FALHAS: parseInt(values[9]?.trim()) || 0,
+            ESP: values[10]?.trim() || '',
+            COR: values[11]?.trim() || '#FF0000',
+            qtde_plantas: parseInt(values[12]?.trim()) || 0,
+            OBS: values[14]?.trim() || '',
+            ativo: parseInt(values[15]?.trim()) || 1,
+            talhao_kml_id: null // Será vinculado manualmente depois
+          };
+
+          // Verificar se já existe
+          const existing = await fetchQuery<any>('SELECT id FROM talhoes WHERE id = ?', [talhaoData.id]);
+          
+          if (existing && existing.length > 0) {
+            // Atualizar existente
+            const updateSql = `
+              UPDATE talhoes SET 
+                TalhaoID = ?, TIPO = ?, NOME = ?, AREA = ?, VARIEDADE = ?, 
+                PORTAENXERTO = ?, DATA_DE_PLANTIO = ?, IDADE = ?, FALHAS = ?, 
+                ESP = ?, COR = ?, qtde_plantas = ?, OBS = ?, ativo = ?
+              WHERE id = ?
+            `;
+            await runQuery(updateSql, [
+              talhaoData.TalhaoID, talhaoData.TIPO, talhaoData.NOME, talhaoData.AREA,
+              talhaoData.VARIEDADE, talhaoData.PORTAENXERTO, talhaoData.DATA_DE_PLANTIO,
+              talhaoData.IDADE, talhaoData.FALHAS, talhaoData.ESP, talhaoData.COR,
+              talhaoData.qtde_plantas, talhaoData.OBS, talhaoData.ativo, talhaoData.id
+            ]);
+            updatedCount++;
+          } else {
+            // Criar novo
+            const insertSql = `
+              INSERT INTO talhoes (
+                id, TalhaoID, TIPO, NOME, AREA, VARIEDADE, PORTAENXERTO, 
+                DATA_DE_PLANTIO, IDADE, FALHAS, ESP, COR, qtde_plantas, 
+                OBS, ativo, talhao_kml_id
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            await runQuery(insertSql, [
+              talhaoData.id, talhaoData.TalhaoID, talhaoData.TIPO, talhaoData.NOME,
+              talhaoData.AREA, talhaoData.VARIEDADE, talhaoData.PORTAENXERTO,
+              talhaoData.DATA_DE_PLANTIO, talhaoData.IDADE, talhaoData.FALHAS,
+              talhaoData.ESP, talhaoData.COR, talhaoData.qtde_plantas,
+              talhaoData.OBS, talhaoData.ativo, talhaoData.talhao_kml_id
+            ]);
+            importedCount++;
+          }
+        } catch (error) {
+          console.error(`Erro ao processar linha ${i + 1}:`, error);
+          errors.push(`Linha ${i + 1}: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+        }
+      }
+
+      console.log(`Importação concluída: ${importedCount} criados, ${updatedCount} atualizados`);
+      
+      res.status(200).json({
+        message: 'Importação concluída com sucesso',
+        imported: importedCount,
+        updated: updatedCount,
+        errors: errors
+      });
+    } catch (error) {
+      console.error('Erro na importação do CSV:', error);
+      res.status(500).json({ 
+        error: 'Erro interno na importação do CSV',
+        details: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    }
+  })
+);
+
+// Endpoint para consultar talhões com cores das variedades configuradas
+app.get(
+  '/talhoes/com-variedades-configs',
+  asyncHandler(async (req, res, next) => {
+    const sql = `
+      SELECT 
+        t.id,
+        t.TalhaoID,
+        t.NOME as nome_talhao,
+        t.TIPO,
+        t.AREA,
+        t.VARIEDADE,
+        t.COR as cor_atual_talhao,
+        vc.name as variedade_config_nome,
+        vc.default_color as cor_configurada_variedade,
+        CASE 
+          WHEN vc.default_color IS NOT NULL THEN vc.default_color 
+          ELSE t.COR 
+        END as cor_final,
+        t.IDADE,
+        t.qtde_plantas,
+        CASE 
+          WHEN vc.id IS NOT NULL THEN 1
+          ELSE 0
+        END as tem_configuracao_variedade
+      FROM talhoes t
+      LEFT JOIN variedade_configs vc ON UPPER(TRIM(t.VARIEDADE)) = UPPER(TRIM(vc.name))
+      WHERE t.ativo = 1
+      ORDER BY t.VARIEDADE, t.NOME
+    `;
+    
+    const result = await fetchQuery<any>(sql, []);
+    res.status(200).json(result);
+  })
+);
+
+// Endpoint para estatísticas de variedades
+app.get(
+  '/variedades/estatisticas',
+  asyncHandler(async (req, res, next) => {
+    const sql = `
+      SELECT 
+        COALESCE(vc.name, t.VARIEDADE, 'SEM VARIEDADE') as variedade,
+        vc.default_color as cor_configurada,
+        COUNT(*) as total_talhoes,
+        SUM(t.qtde_plantas) as total_plantas,
+        ROUND(AVG(t.IDADE), 1) as idade_media,
+        CASE 
+          WHEN vc.id IS NOT NULL THEN 1
+          ELSE 0
+        END as tem_configuracao
+      FROM talhoes t
+      LEFT JOIN variedade_configs vc ON UPPER(TRIM(t.VARIEDADE)) = UPPER(TRIM(vc.name))
+      WHERE t.ativo = 1
+      GROUP BY COALESCE(vc.name, t.VARIEDADE), vc.default_color, vc.id
+      ORDER BY total_talhoes DESC
+    `;
+    
+    const result = await fetchQuery<any>(sql, []);
+    res.status(200).json(result);
+  })
+);
+
+// Endpoint para aplicar cores das variedades configuradas aos talhões
+app.put(
+  '/talhoes/aplicar-cores-variedades',
+  asyncHandler(async (req, res, next) => {
+    console.log('Aplicando cores das variedades configuradas aos talhões...');
+    
+    // Primeiro, buscar quais talhões serão afetados
+    const talhoesParaAtualizar = await fetchQuery<any>(`
+      SELECT 
+        t.id,
+        t.NOME,
+        t.VARIEDADE,
+        t.COR as cor_atual,
+        vc.default_color as cor_nova
+      FROM talhoes t
+      INNER JOIN variedade_configs vc ON UPPER(TRIM(t.VARIEDADE)) = UPPER(TRIM(vc.name))
+      WHERE t.ativo = 1 AND t.COR != vc.default_color
+    `, []);
+    
+    if (talhoesParaAtualizar.length === 0) {
+      res.status(200).json({ 
+        message: 'Nenhum talhão precisa de atualização de cor',
+        atualizados: 0
+      });
+      return;
+    }
+    
+    // Aplicar as cores
+    const updateSql = `
+      UPDATE talhoes 
+      SET COR = (
+        SELECT vc.default_color 
+        FROM variedade_configs vc 
+        WHERE UPPER(TRIM(talhoes.VARIEDADE)) = UPPER(TRIM(vc.name))
+      )
+      WHERE EXISTS (
+        SELECT 1 
+        FROM variedade_configs vc 
+        WHERE UPPER(TRIM(talhoes.VARIEDADE)) = UPPER(TRIM(vc.name))
+      )
+      AND ativo = 1
+    `;
+    
+    await runQuery(updateSql, []);
+    
+    console.log(`Cores aplicadas a ${talhoesParaAtualizar.length} talhões`);
+    
+    res.status(200).json({ 
+      message: `Cores das variedades aplicadas com sucesso a ${talhoesParaAtualizar.length} talhão(ões)`,
+      atualizados: talhoesParaAtualizar.length,
+      detalhes: talhoesParaAtualizar
+    });
+  })
+);
+
 // Iniciar o servidor após inicializar o banco de dados
 const startServer = async () => {
   try {
-    await initializeDatabase();
+    // TODO: Migrar para Supabase em produção
+    // SQLite não funciona no Vercel (serverless)
+    if (process.env.NODE_ENV !== 'production') {
+      await initializeDatabase();
+    }
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (error) {
     console.error('Failed to initialize database and start server:', error);
