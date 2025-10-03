@@ -4,16 +4,28 @@ export interface Talhao {
   TIPO: string;
   NOME: string;
   AREA: string;
-  VARIEDADE: string;
-  PORTAENXERTO: string;
-  DATA_DE_PLANTIO: string;
+  VARIEDADE?: string;
+  PORTAENXERTO?: string;
+  DATA_DE_PLANTIO?: string;
   IDADE: number;
-  FALHAS: number;
-  ESP: number;
-  COR: string;
+  FALHAS?: number;
+  ESP?: string; // Mudando para string para compatibilidade com backend
+  COR?: string;
   qtde_plantas?: number;
+  coordinates?: string; // Para compatibilidade - agora vem via talhao_kml_id
+  talhao_kml_id?: string; // Nova referência para talhoes_kml
   OBS?: string;
   ativo: boolean;
+}
+
+export interface TalhaoKml {
+  id: string;
+  placemark_name: string;
+  coordinates: string;
+  geometry_type: string;
+  kml_file_id?: string;
+  data_importacao?: number;
+  ativo: number;
 }
 
 export interface Carregamento {

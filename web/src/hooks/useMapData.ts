@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
+import { fetchTalhoes, fetchTalhoesSafra, fetchKmlFiles } from '../api';
 
-// Interface para Talhao, definida localmente
+// Interface para Talhao, definida localmente para compatibilidade
 interface Talhao {
   id: string;
   TalhaoID?: string;
@@ -16,6 +17,7 @@ interface Talhao {
   COR: string;
   qtde_plantas?: number;
   coordinates?: string;
+  talhao_kml_id?: string;
   ativo: boolean;
 }
 
@@ -32,24 +34,27 @@ interface MapData {
   fetchData: () => Promise<void>;
 }
 
-export function useMapData(): MapData {
+export function useMapData(safraId?: string): MapData {
   const [talhoes, setTalhoes] = useState<Talhao[]>([]);
   const [kmlFiles, setKmlFiles] = useState<KmlFile[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
-
   const fetchData = useCallback(async () => {
     try {
-      console.log(`[${new Date().toISOString()}] useMapData: Buscando talhoes`);
-      const talhoesResponse = await fetch(`${BASE_URL}/talhoes`);
-      if (!talhoesResponse.ok) throw new Error('Erro ao buscar talhões');
-      const talhoesData: Talhao[] = await talhoesResponse.json();
+      console.log(`[${new Date().toISOString()}] useMapData: Buscando dados${safraId ? ` para safra ${safraId}` : ''}`);
+      
+      let talhoesData: any[];
+      
+      if (safraId) {
+        // Se safra foi fornecida, busca talhões com dados de safra (incluindo coordenadas)
+        talhoesData = await fetchTalhoesSafra(safraId);
+      } else {
+        // Senão, busca talhões normais
+        talhoesData = await fetchTalhoes();
+      }
 
       console.log(`[${new Date().toISOString()}] useMapData: Buscando kml_files`);
-      const kmlFilesResponse = await fetch(`${BASE_URL}/kml_files`);
-      if (!kmlFilesResponse.ok) throw new Error('Erro ao buscar arquivos KML');
-      const kmlFilesData: KmlFile[] = await kmlFilesResponse.json();
+      const kmlFilesData = await fetchKmlFiles();
 
       setTalhoes(talhoesData);
       setKmlFiles(kmlFilesData);
@@ -59,9 +64,9 @@ export function useMapData(): MapData {
       setError(errorMessage);
       console.error('Erro no useMapData:', errorMessage);
     }
-  }, [BASE_URL]); // Dependência apenas de BASE_URL, que não muda
+  }, [safraId]); // Dependência de safraId para recarregar quando mudar
 
-  // Carrega os dados automaticamente ao montar o hook
+  // Carrega os dados automaticamente ao montar o hook ou quando safraId mudar
   useEffect(() => {
     fetchData();
   }, [fetchData]);

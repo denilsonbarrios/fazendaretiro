@@ -34,7 +34,7 @@ interface ConfigOption {
 }
 
 function MapPage({ safraId }: MapPageProps) {
-  const { talhoes, error, fetchData } = useMapData();
+  const { talhoes, error, fetchData } = useMapData(safraId || undefined);
   const [selectedTalhao, setSelectedTalhao] = useState<Talhao | null>(null);
   const [producaoCaixa, setProducaoCaixa] = useState<number>(0);
   const mapRef = useRef<L.Map | null>(null);
@@ -98,13 +98,13 @@ function MapPage({ safraId }: MapPageProps) {
       TIPO: talhao.TIPO,
       NOME: talhao.NOME,
       AREA: parseFloat(talhao.AREA) || 0,
-      VARIEDADE: talhao.VARIEDADE,
-      PORTAENXERTO: talhao.PORTAENXERTO,
-      DATA_DE_PLANTIO: talhao.DATA_DE_PLANTIO,
-      IDADE: calculateAge(talhao.DATA_DE_PLANTIO),
-      FALHAS: talhao.FALHAS,
-      ESP: talhao.ESP,
-      COR: talhao.COR,
+      VARIEDADE: talhao.VARIEDADE ?? '',
+      PORTAENXERTO: talhao.PORTAENXERTO ?? '',
+      DATA_DE_PLANTIO: talhao.DATA_DE_PLANTIO ?? '',
+      IDADE: calculateAge(talhao.DATA_DE_PLANTIO ?? ''),
+      FALHAS: talhao.FALHAS ?? 0,
+      ESP: talhao.ESP ?? '',
+      COR: talhao.COR ?? '',
       QTDE_PLANTAS: talhao.qtde_plantas || 0,
       OBS: talhao.OBS || '',
       ativo: talhao.ativo,
