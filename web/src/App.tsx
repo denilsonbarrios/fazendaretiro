@@ -40,9 +40,23 @@ function AppContent() {
 
   const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+  // Helper para obter headers com autenticação
+  const getAuthHeaders = (): HeadersInit => {
+    const token = localStorage.getItem('token');
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
   const fetchSafras = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/safras`);
+      const response = await fetch(`${BASE_URL}/safras`, {
+        headers: getAuthHeaders(),
+      });
       if (!response.ok) throw new Error('Erro ao buscar safras');
       const records = await response.json();
       setSafras(records);
@@ -77,7 +91,7 @@ function AppContent() {
 
       const response = await fetch(`${BASE_URL}/safras`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           nome: newSafraName,
           is_active: true,
