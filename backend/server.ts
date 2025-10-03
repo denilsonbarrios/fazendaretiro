@@ -33,26 +33,8 @@ if (IS_PRODUCTION && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KE
   console.error('❌ SUPABASE_URL ou SUPABASE_SERVICE_KEY não configurados!');
 }
 
-// Importar funções do DB apenas em desenvolvimento
-let initializeDatabase: any;
-let generateId: any;
-let runQuery: any;
-let fetchQuery: any;
-
-if (!IS_PRODUCTION) {
-  const dbModule = require('./db');
-  initializeDatabase = dbModule.initializeDatabase;
-  generateId = dbModule.generateId;
-  runQuery = dbModule.runQuery;
-  fetchQuery = dbModule.fetchQuery;
-} else {
-  // Usar módulo vazio em produção
-  const dbProdModule = require('./db.prod');
-  initializeDatabase = dbProdModule.initializeDatabase;
-  generateId = dbProdModule.generateId;
-  runQuery = dbProdModule.runQuery;
-  fetchQuery = dbProdModule.fetchQuery;
-}
+// Importar funções do DB universal (funciona em dev e prod)
+import { initializeDatabase, generateId, runQuery, fetchQuery } from './db-universal';
 
 // Configurar o multer para usar memória (compatível com serverless)
 const upload = multer({ storage: multer.memoryStorage() });
@@ -1912,11 +1894,9 @@ app.put(
 // Iniciar o servidor após inicializar o banco de dados
 const startServer = async () => {
   try {
-    // TODO: Migrar para Supabase em produção
-    // SQLite não funciona no Vercel (serverless)
-    if (process.env.NODE_ENV !== 'production') {
-      await initializeDatabase();
-    }
+    // Inicializar banco (SQLite em dev, Supabase em prod)
+    await initializeDatabase();
+    
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
