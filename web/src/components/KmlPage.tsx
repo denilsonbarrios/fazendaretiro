@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { 
-  fetchKmlFiles, 
-  uploadKmlFile, 
-  deleteKmlFile, 
-  fetchTalhoesKml, 
-  fetchTalhoesKmlSemVinculo 
+import {
+  fetchKmlFiles,
+  uploadKmlData,
+  deleteKmlFile,
+  fetchTalhoesKml,
+  fetchTalhoesKmlSemVinculo
 } from '../api';
+import { parseKMLSimple } from '../kmlParser';
 import { TalhaoKml } from '../types';
 
 // Interface para KmlFile
@@ -107,13 +108,30 @@ function KmlPage() {
     setMessage('');
 
     try {
-      console.log('Iniciando upload do arquivo:', {
+      console.log('Iniciando processamento do arquivo:', {
         name: file.name,
         size: file.size,
         type: file.type,
-      });      // Enviar o novo arquivo KML
-      const result = await uploadKmlFile(file);
-      console.log('KmlPage: KML processado pelo backend:', result);
+      });
+
+      // Ler o conteúdo do arquivo
+      const kmlContent = await file.text();
+      console.log('Arquivo KML lido, tamanho:', kmlContent.length);
+
+      // Parsear KML localmente
+      const geojson = parseKMLSimple(kmlContent);
+      console.log('KML parseado localmente:', geojson);
+
+      if (!geojson.features || geojson.features.length === 0) {
+        throw new Error('Nenhum polígono encontrado no arquivo KML');
+      }
+
+      // Enviar dados parseados para o backend
+      const result = await uploadKmlData({
+        fileName: file.name,
+        geojson: geojson
+      });
+      console.log('KmlPage: Dados KML processados pelo backend:', result);
 
       // Atualizar a lista de dados
       await fetchData();

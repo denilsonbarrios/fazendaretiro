@@ -492,6 +492,120 @@ app.post(
   })
 );
 
+// Novo endpoint para upload de dados KML parseados (mais eficiente para Vercel)
+app.post(
+  '/kml/upload-data',
+  asyncHandler(async (req, res, next) => {
+    console.log('Received KML data upload request');
+
+    const { fileName, geojson } = req.body;
+
+    if (!fileName || !geojson) {
+      res.status(400).json({ error: 'fileName e geojson são obrigatórios' });
+      return;
+    }
+
+    if (!geojson.features || geojson.features.length === 0) {
+      res.status(400).json({ error: 'Nenhum feature encontrado no geojson' });
+      return;
+    }
+
+    console.log('Dados recebidos:', {
+      fileName,
+      featuresCount: geojson.features.length
+    });
+
+    // Buscar todos os talhões KML existentes no banco de dados
+    const existingTalhoesKml = await fetchQuery<any>('SELECT * FROM talhoes_kml', []);
+    console.log(`Total de talhões KML existentes no banco: ${existingTalhoesKml.length}`);
+
+    const kmlId = generateId();
+    const kmlSql = `
+      INSERT INTO kml_files (id, name, content)
+      VALUES (?, ?, ?)
+    `;
+    await runQuery(kmlSql, [kmlId, fileName, JSON.stringify(geojson)]);
+    console.log('KML data saved to database:', kmlId);
+
+    const processedPlacemarkNames = new Set<string>();
+    let createdKmlTalhoes = 0;
+    let updatedKmlTalhoes = 0;
+    let removedKmlTalhoes = 0;
+    let unlinkedTalhoes = 0;
+
+    // Processar cada feature do GeoJSON
+    for (const feature of geojson.features) {
+      if (feature.geometry && feature.properties) {
+        const placemarkName = feature.properties.name || 'Unnamed';
+        processedPlacemarkNames.add(placemarkName);
+
+        // Verificar se já existe um talhão KML com este nome
+        const existingTalhaoKml = existingTalhoesKml.find(
+          (t: any) => t.placemark_name === placemarkName
+        );
+
+        if (existingTalhaoKml) {
+          // Atualizar talhão KML existente
+          await runQuery(
+            'UPDATE talhoes_kml SET geometry = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [JSON.stringify(feature.geometry), existingTalhaoKml.id]
+          );
+          console.log(`Talhão KML ${placemarkName} atualizado`);
+          updatedKmlTalhoes++;
+        } else {
+          // Criar novo talhão KML
+          const talhaoKmlId = generateId();
+          await runQuery(
+            'INSERT INTO talhoes_kml (id, placemark_name, geometry, ativo, created_at, updated_at) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
+            [talhaoKmlId, placemarkName, JSON.stringify(feature.geometry)]
+          );
+          console.log(`Novo talhão KML ${placemarkName} criado`);
+          createdKmlTalhoes++;
+        }
+      }
+    }
+
+    // Remover talhões KML que não estão mais no arquivo
+    for (const existingTalhaoKml of existingTalhoesKml) {
+      if (!processedPlacemarkNames.has(existingTalhaoKml.placemark_name)) {
+        // Verificar se este talhão KML está vinculado a algum talhão
+        const linkedTalhoes = await fetchQuery<any>(
+          'SELECT id FROM talhoes WHERE talhao_kml_id = ?',
+          [existingTalhaoKml.id]
+        );
+
+        if (linkedTalhoes.length > 0) {
+          // Desvincular talhões
+          await runQuery(
+            'UPDATE talhoes SET talhao_kml_id = NULL WHERE talhao_kml_id = ?',
+            [existingTalhaoKml.id]
+          );
+          console.log(`Desvinculado ${linkedTalhoes.length} talhão(ões) do talhão KML ${existingTalhaoKml.placemark_name}`);
+          unlinkedTalhoes += linkedTalhoes.length;
+        }
+
+        // Remover o talhão KML
+        await runQuery('DELETE FROM talhoes_kml WHERE id = ?', [existingTalhaoKml.id]);
+        console.log(`Talhão KML ${existingTalhaoKml.placemark_name} (ID: ${existingTalhaoKml.id}) removido`);
+        removedKmlTalhoes++;
+      }
+    }
+
+    const message = `KML processado com sucesso. ${createdKmlTalhoes} novos talhões KML criados, ${updatedKmlTalhoes} atualizados.` +
+      (removedKmlTalhoes > 0 ? ` ${removedKmlTalhoes} talhões KML removidos (não presentes no novo arquivo).` : '') +
+      (unlinkedTalhoes > 0 ? ` ${unlinkedTalhoes} talhão(ões) desvinculado(s).` : '');
+
+    res.status(200).json({
+      message,
+      kmlId,
+      createdKmlTalhoes,
+      updatedKmlTalhoes,
+      removedKmlTalhoes,
+      unlinkedTalhoes
+    });
+  })
+);
+
 // Endpoint para listar safras
 app.get(
   '/safras',

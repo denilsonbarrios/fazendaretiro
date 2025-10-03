@@ -193,8 +193,11 @@ export const deleteKmlFile = async (id: string): Promise<{ message: string }> =>
   return handleResponse(response);
 };
 
-// Novo endpoint para upload de KML (confirmado que está exportado)
-export const uploadKmlFile = async (kmlFile: File): Promise<{ 
+// Novo endpoint para upload de dados KML parseados (mais eficiente para Vercel)
+export const uploadKmlData = async (kmlData: {
+  fileName: string;
+  geojson: any;
+}): Promise<{ 
   message: string; 
   kmlId: string; 
   createdKmlTalhoes: number;
@@ -202,12 +205,10 @@ export const uploadKmlFile = async (kmlFile: File): Promise<{
   removedKmlTalhoes?: number;
   unlinkedTalhoes?: number;
 }> => {
-  const formData = new FormData();
-  formData.append('kmlFile', kmlFile);
-
-  const response = await authFetch(`${BASE_URL}/kml/upload`, {
+  const response = await authFetch(`${BASE_URL}/kml/upload-data`, {
     method: 'POST',
-    body: formData,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(kmlData),
   });
   return handleResponse(response);
 };
