@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { BASE_URL } from '../api';
 
 // Interfaces definidas localmente com base nos dados retornados pelo backend
 interface ConfigOption {
@@ -32,8 +33,6 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
   const [variedadeFormData, setVariedadeFormData] = useState<{ name: string; defaultColor: string; editingId?: string } | null>(null);
   const [safraFormData, setSafraFormData] = useState<SafraFormData | null>(null);
   const [message, setMessage] = useState<string>('');
-
-  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
   const fetchConfigs = async () => {
     try {

@@ -5,6 +5,7 @@ import autoTable from 'jspdf-autotable';
 import { ColheitaDashboard } from './ColheitaDashboard';
 import { toast } from 'react-toastify';
 import { Talhao, Carregamento, Motorista, PrevRealizado, Previsao, SemanaColheita, Safra, DinamicaData, CarregamentoFormData } from '../types';
+import { BASE_URL } from '../api';
 
 interface ColheitaPageProps {
   safraId: string | null;
@@ -40,8 +41,6 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const [previsaoFormData, setPrevisaoFormData] = useState<{ [talhaoId: string]: { safraId: string; qtdeCaixasPrevPe: number } }>({});
   const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
   const generateId = (): string => {
     return Math.random().toString(36).substr(2, 9);
@@ -136,22 +135,34 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   };
 
   const fetchTalhoesData = async () => {
+    if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/talhoes`);
-      if (!response.ok) throw new Error('Erro ao buscar talhões');
-      const records = await response.json();
-      console.log('Talhões carregados:', records);
-      const filteredTalhoes = records.filter((talhao: Talhao) => {
+      const response = await fetch(`${BASE_URL}/talhoes-apenas-safra/${safraId}`);
+      if (!response.ok) throw new Error('Erro ao buscar talhões da safra');
+      const data = await response.json();
+      const records = data.talhoes || [];
+      console.log('Talhões da safra carregados:', records.length);
+      console.log('Talhões com coordenadas:', records.filter((t: any) => t.coordinates).length);
+      const filteredTalhoes = records.filter((talhao: any) => {
         if (!talhao.NOME) {
           console.warn('Talhão sem NOME encontrado:', talhao);
           return false;
         }
-        if (!talhao.id) {
-          console.warn('Talhão sem ID encontrado:', talhao);
+        if (!talhao.talhao_base_id) {
+          console.warn('Talhão sem talhao_base_id encontrado:', talhao);
           return false;
         }
         return talhao.TIPO === 'TALHAO';
-      });
+      }).map((talhao: any) => ({
+        ...talhao,
+        id: talhao.talhao_base_id, // Usar talhao_base_id como id principal
+        ativo: talhao.ativo_na_safra === 1, // Mapear ativo_na_safra para ativo
+        VARIEDADE: talhao.variedade || talhao.VARIEDADE || '', // Garantir que VARIEDADE nunca seja undefined
+        qtde_plantas: talhao.qtde_plantas || 0,
+        IDADE: talhao.idade || talhao.IDADE || 0,
+        FALHAS: talhao.falhas || talhao.FALHAS || 0,
+        ESP: talhao.esp || talhao.ESP || '',
+      }));
       console.log('Talhões filtrados (tipo TALHAO e com NOME):', filteredTalhoes);
       setTalhoes(filteredTalhoes);
     } catch (error) {
@@ -184,24 +195,52 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
 
   const calculateDinamica = (): DinamicaData[] => {
     console.log('Calculando Dinâmica - Talhões:', talhoes, 'Carregamentos:', carregamentos);
+    console.log('IDs dos talhões:', talhoes.map(t => ({ id: t.id, TalhaoID: t.TalhaoID, NOME: t.NOME })));
+    console.log('IDs dos carregamentos:', carregamentos.map(c => ({ talhao_id: c.talhao_id, variedade: c.variedade })));
     const dinamicaMap: { [key: string]: DinamicaData } = {};
 
     carregamentos.forEach((carregamento) => {
-      const talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
-      if (!talhao || !talhao.ativo) return; // Ignorar talhões inativos
-      const talhaoNome = talhao ? talhao.NOME : 'Desconhecido';
-      const qtdePlantas = carregamento.qtde_plantas || 0;
-      const key = `${carregamento.talhao_id}-${carregamento.variedade || talhao.VARIEDADE || 'Desconhecida'}`;
+      // Tentar encontrar talhão usando diferentes IDs possíveis
+      let talhao = talhoes.find((t) => t.id === carregamento.talhao_id);
+      if (!talhao) {
+        talhao = talhoes.find((t) => t.TalhaoID === carregamento.talhao_id);
+      }
+      if (!talhao) {
+        talhao = talhoes.find((t) => (t as any).talhao_base_id === carregamento.talhao_id);
+      }
+      
+      if (!talhao) {
+        console.warn(`Talhão não encontrado para carregamento: ${carregamento.talhao_id}`);
+        return; // Pular este carregamento
+      }
+      
+      console.log(`Carregamento ${carregamento.id}: talhao_id=${carregamento.talhao_id}, talhão encontrado:`, talhao.NOME);
+      
+      // Verificar se o talhão está ativo na safra
+      if (!talhao.ativo) {
+        console.log(`Talhão ${talhao.NOME} está inativo na safra, pulando`);
+        return; // Ignorar talhões inativos na safra
+      }
+      
+      const talhaoNome = talhao.NOME;
+      // Usar qtde_plantas da safra (já mapeado corretamente)
+      const qtdePlantas = talhao.qtde_plantas || carregamento.qtde_plantas || 0;
+      // Usar variedade da safra (já mapeado corretamente)
+      const variedade = carregamento.variedade || talhao.VARIEDADE || 'Desconhecida';
+      const key = `${carregamento.talhao_id}-${variedade}`;
 
       if (!dinamicaMap[key]) {
         dinamicaMap[key] = {
           talhaoId: carregamento.talhao_id,
           talhaoNome: talhaoNome,
-          variedade: carregamento.variedade || talhao.VARIEDADE || 'Desconhecida',
+          variedade: variedade,
           totalCaixas: 0,
-          qtdePlantas: qtdePlantas,
+          qtdePlantas: qtdePlantas, // Usar qtde_plantas da safra
           mediaCaixasPorPlanta: 0,
         };
+      } else {
+        // Se já existe, usar a maior qtde_plantas (pode variar entre carregamentos)
+        dinamicaMap[key].qtdePlantas = Math.max(dinamicaMap[key].qtdePlantas, qtdePlantas);
       }
 
       dinamicaMap[key].totalCaixas += carregamento.qte_caixa;
@@ -854,7 +893,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
             <ColheitaDashboard
               dinamicaData={dinamicaData}
               carregamentos={carregamentos}
-              talhoes={talhoes}
+              talhoes={talhoes as any}
               resumoGeral={resumoGeral}
             />
           ) : (

@@ -1,6 +1,7 @@
 import { MapContainer, TileLayer, Polygon, useMap, LayersControl, Marker, Popup } from 'react-leaflet';
 import { useEffect, useState, useRef } from 'react';
 import { useMapData } from '../hooks/useMapData';
+import { BASE_URL } from '../api';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { toast } from 'react-toastify';
@@ -45,8 +46,6 @@ function MapPage({ safraId }: MapPageProps) {
   const [editingTalhao, setEditingTalhao] = useState<Talhao | null>(null);
   const [tipoOptions, setTipoOptions] = useState<ConfigOption[]>([]);
   const [variedadeOptions, setVariedadeOptions] = useState<ConfigOption[]>([]);
-
-  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
   const fetchProducaoCaixa = async (talhaoId: string) => {
     if (!safraId) return;

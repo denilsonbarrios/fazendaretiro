@@ -4,6 +4,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
+import { BASE_URL } from './api';
 
 // Carregar componentes de forma assíncrona
 const MapPage = lazy(() => import('./components/MapPage'));

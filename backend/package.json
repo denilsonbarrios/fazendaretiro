@@ -6,32 +6,41 @@
   "scripts": {
     "start": "ts-node server.ts",
     "build": "tsc",
-    "dev": "ts-node-dev --respawn server.ts"
+    "dev": "ts-node-dev --respawn server.ts",
+    "export-sqlite": "ts-node export-sqlite-data.ts",
+    "import-to-supabase": "ts-node import-to-supabase.ts",
+    "generate-schema": "ts-node generate-schema.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@supabase/supabase-js": "^2.58.0",
     "@tmcw/togeojson": "^7.1.1",
     "@types/express": "^5.0.1",
     "@types/sqlite3": "^3.1.11",
+    "bcryptjs": "^3.0.2",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-fileupload": "^1.5.1",
     "geojson": "^0.5.0",
+    "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.2",
     "sqlite3": "^5.1.7",
     "typescript": "^5.8.3",
     "xmldom": "^0.6.0"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express-fileupload": "^1.5.1",
     "@types/geojson": "^7946.0.16",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/multer": "^1.4.12",
-    "@types/node": "^22.15.15",
+    "@types/node": "^22.18.8",
     "@types/xmldom": "^0.1.34",
     "ts-node": "^10.9.2"
   }

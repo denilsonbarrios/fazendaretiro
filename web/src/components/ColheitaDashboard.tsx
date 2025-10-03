@@ -69,7 +69,7 @@ const formatNumber = (value: number, decimals: number = 2): string => {
 export function ColheitaDashboard({ dinamicaData, carregamentos, talhoes, resumoGeral }: ColheitaDashboardProps) {
   // Calcular métricas principais
   const totalCaixasColhidas = carregamentos.reduce((sum, c) => sum + c.qte_caixa, 0);
-  const totalTalhoesAtivos = talhoes.filter((t) => t.ativo).length;
+  const totalTalhoesAtivos = talhoes.filter((t) => t.ativo === true).length;
   const mediaCaixasPorPlanta = dinamicaData.length > 0
     ? dinamicaData.reduce((sum, d) => sum + d.mediaCaixasPorPlanta, 0) / dinamicaData.length
     : 0;

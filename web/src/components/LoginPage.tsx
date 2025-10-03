@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { toast } from 'react-toastify';
-
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { useAuth } from '../contexts/AuthContext';
+import { BASE_URL } from '../api';
+import '../styles/main.scss';
 
 interface LoginPageProps {
   onLoginSuccess: (token: string, user: any) => void;

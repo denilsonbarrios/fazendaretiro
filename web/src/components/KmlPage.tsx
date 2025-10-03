@@ -1,4 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+import { 
+  fetchKmlFiles, 
+  uploadKmlFile, 
+  deleteKmlFile, 
+  fetchTalhoesKml, 
+  fetchTalhoesKmlSemVinculo 
+} from '../api';
+import { TalhaoKml } from '../types';
 
 // Interface para KmlFile
 interface KmlFile {
@@ -16,21 +24,25 @@ interface Talhao {
 }
 
 function KmlPage() {
+  // Estados para controle de abas
+  const [activeTab, setActiveTab] = useState<'kml' | 'talhoes'>('kml');
+  
+  // Estados para KML Files
   const [kmls, setKmls] = useState<KmlFile[]>([]);
+  
+  // Estados para Talhões KML
+  const [talhoesKml, setTalhoesKml] = useState<TalhaoKml[]>([]);
+  const [talhoesKmlSemVinculo, setTalhoesKmlSemVinculo] = useState<TalhaoKml[]>([]);
+  
+  // Estados gerais
   const [message, setMessage] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-
-  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
 
   // Função para buscar KMLs
   const fetchKmlsData = useCallback(async () => {
     try {
       console.log(`[${new Date().toISOString()}] KmlPage: Buscando KMLs`);
-      const response = await fetch(`${BASE_URL}/kml_files`);
-      if (!response.ok) {
-        throw new Error(`Erro ao buscar KMLs: ${response.status} ${response.statusText}`);
-      }
-      const kmlRecords: KmlFile[] = await response.json();
+      const kmlRecords = await fetchKmlFiles();
       console.log('KmlPage: KMLs carregados:', kmlRecords);
       setKmls(kmlRecords);
       return kmlRecords;
@@ -40,98 +52,50 @@ function KmlPage() {
     }
   }, []);
 
-  // Função para buscar talhões
-  const fetchTalhoesData = useCallback(async () => {
+  // Função para buscar talhões KML
+  const fetchTalhoesKmlData = useCallback(async () => {
     try {
-      console.log(`[${new Date().toISOString()}] KmlPage: Buscando talhões`);
-      const response = await fetch(`${BASE_URL}/talhoes`);
-      if (!response.ok) {
-        throw new Error(`Erro ao buscar talhões: ${response.status} ${response.statusText}`);
-      }
-      const talhoes: Talhao[] = await response.json();
-      console.log('KmlPage: Talhões carregados:', talhoes);
-      return talhoes;
+      console.log(`[${new Date().toISOString()}] KmlPage: Buscando talhões KML`);
+      const talhoesKmlRecords = await fetchTalhoesKml();
+      console.log('KmlPage: Talhões KML carregados:', talhoesKmlRecords);
+      setTalhoesKml(talhoesKmlRecords);
+      
+      const talhoesKmlSemVinculoRecords = await fetchTalhoesKmlSemVinculo();
+      console.log('KmlPage: Talhões KML sem vínculo carregados:', talhoesKmlSemVinculoRecords);
+      setTalhoesKmlSemVinculo(talhoesKmlSemVinculoRecords);
+      
+      return talhoesKmlRecords;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao buscar talhões';
-      throw new Error(errorMessage);
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao buscar talhões KML';
+          throw new Error(errorMessage);
     }
   }, []);
 
-  // Função para atualizar as coordenadas de um talhão
-  const updateTalhaoCoordinates = async (talhao: Talhao): Promise<void> => {
-    try {
-      if (!talhao.ativo) {
-        console.log(`Talhão ${talhao.NOME} está inativo, pulando atualização de coordenadas`);
-        return;
-      }
-
-      console.log(`Buscando coordenadas para o talhão ${talhao.id}`);
-      const coordsResponse = await fetch(`${BASE_URL}/talhoes/${talhao.id}/coordinates`);
-      if (!coordsResponse.ok) {
-        const errorText = await coordsResponse.text();
-        console.warn(`Coordenadas não encontradas para o talhão ${talhao.id}: ${errorText}`);
-        return;
-      }
-      const { coordinates } = await coordsResponse.json();
-      console.log(`Coordenadas recuperadas para o talhão ${talhao.id}:`, coordinates);
-
-      const updateResponse = await fetch(`${BASE_URL}/talhoes/${talhao.id}/coordinates`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ coordinates }),
-      });
-
-      if (!updateResponse.ok) {
-        const errorText = await updateResponse.text();
-        throw new Error(`Erro ao atualizar as coordenadas do talhão ${talhao.id}: ${errorText}`);
-      }
-
-      console.log(`Coordenadas do talhão ${talhao.id} atualizadas com sucesso.`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      throw new Error(`Falha ao atualizar coordenadas do talhão ${talhao.id}: ${errorMessage}`);
-    }
-  };
-
-  // Função principal para atualizar os polígonos
-  const fetchKmls = useCallback(async () => {
+  // Função principal para atualizar os dados
+  const fetchData = useCallback(async () => {
     setIsLoading(true);
     setMessage('');
 
     try {
-      const kmlRecords = await fetchKmlsData();
-
-      if (kmlRecords.length === 0) {
-        setMessage('Nenhum KML encontrado para atualizar os polígonos.');
-        return;
+      if (activeTab === 'kml') {
+        await fetchKmlsData();
+      } else {
+        await fetchTalhoesKmlData();
       }
-
-      const talhoes = await fetchTalhoesData();
-
-      const updatePromises = talhoes.map((talhao) =>
-        updateTalhaoCoordinates(talhao).catch((error) => {
-          console.error(error.message);
-          return null; // Retorna null para erros parciais
-        })
-      );
-
-      await Promise.all(updatePromises);
-
-      setMessage('Polígonos atualizados com sucesso!');
+      setMessage('Dados atualizados com sucesso!');
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao atualizar polígonos';
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao atualizar dados';
       setMessage(errorMessage);
-      console.error('KmlPage: Erro ao atualizar polígonos:', error);
+      console.error('KmlPage: Erro ao atualizar dados:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [fetchKmlsData, fetchTalhoesData]);
+  }, [activeTab, fetchKmlsData, fetchTalhoesKmlData]);
 
-  // Carrega os KMLs ao montar o componente
+  // Carregar dados iniciais ao montar o componente ou mudar aba
   useEffect(() => {
-    fetchKmlsData();
-  }, [fetchKmlsData]);
-
+    fetchData();
+  }, [fetchData]);
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) {
@@ -147,28 +111,23 @@ function KmlPage() {
         name: file.name,
         size: file.size,
         type: file.type,
-      });
-
-      // Enviar o novo arquivo KML sem excluir os existentes
-      const formData = new FormData();
-      formData.append('kmlFile', file);
-      console.log('Enviando requisição para /kml/upload');
-      const response = await fetch(`${BASE_URL}/kml/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro ao enviar KML: ${response.status} ${errorText}`);
-      }
-
-      const result = await response.json();
+      });      // Enviar o novo arquivo KML
+      const result = await uploadKmlFile(file);
       console.log('KmlPage: KML processado pelo backend:', result);
 
-      // Atualizar a lista de KMLs e talhões
-      await fetchKmls();
-      setMessage('Arquivo KML carregado e processado com sucesso! Talhões existentes foram atualizados e novos talhões foram criados conforme necessário.');
+      // Atualizar a lista de dados
+      await fetchData();
+      
+      // Construir mensagem detalhada
+      let detailedMessage = result.message;
+      if (result.removedKmlTalhoes && result.removedKmlTalhoes > 0) {
+        detailedMessage += ` Foram removidos ${result.removedKmlTalhoes} talhão(ões) KML que não estavam presentes no novo arquivo.`;
+      }
+      if (result.unlinkedTalhoes && result.unlinkedTalhoes > 0) {
+        detailedMessage += ` ${result.unlinkedTalhoes} talhão(ões) foi(ram) desvinculado(s).`;
+      }
+      
+      setMessage(detailedMessage);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao carregar arquivo KML';
       setMessage(errorMessage);
@@ -177,19 +136,14 @@ function KmlPage() {
       setIsLoading(false);
     }
   };
-
   const handleDelete = async (id: string) => {
     setIsLoading(true);
     setMessage('');
 
     try {
       console.log(`Excluindo KML: ${id}`);
-      const response = await fetch(`${BASE_URL}/kml_files/${id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro ao excluir KML: ${response.status} ${errorText}`);
-      }
-      await fetchKmls();
+      await deleteKmlFile(id);
+      await fetchData();
       setMessage('KML excluído com sucesso!');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido ao excluir KML';
@@ -199,27 +153,9 @@ function KmlPage() {
       setIsLoading(false);
     }
   };
-
-  return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif', maxWidth: '1200px', margin: '0 auto' }}>
-      <h2 style={{ fontSize: '24px', color: '#333', marginBottom: '20px' }}>Gerenciamento de KML</h2>
-
-      {message && (
-        <p
-          style={{
-            padding: '10px',
-            backgroundColor: message.includes('Erro') ? '#f8d7da' : '#d4edda',
-            color: message.includes('Erro') ? '#721c24' : '#155724',
-            border: `1px solid ${message.includes('Erro') ? '#f5c6cb' : '#c3e6cb'}`,
-            borderRadius: '5px',
-            marginBottom: '20px',
-            textAlign: 'center',
-          }}
-        >
-          {message}
-        </p>
-      )}
-
+  // Renderizar conteúdo da aba KML Files
+  const renderKmlFilesTab = () => (
+    <>
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', alignItems: 'center' }}>
         <input
           type="file"
@@ -235,7 +171,7 @@ function KmlPage() {
           }}
         />
         <button
-          onClick={fetchKmls}
+          onClick={fetchData}
           disabled={isLoading}
           style={{
             padding: '10px 20px',
@@ -254,7 +190,7 @@ function KmlPage() {
             if (!isLoading) e.currentTarget.style.backgroundColor = '#2196F3';
           }}
         >
-          {isLoading ? 'Carregando...' : 'Atualizar Polígonos'}
+          {isLoading ? 'Carregando...' : 'Atualizar'}
         </button>
       </div>
 
@@ -281,7 +217,16 @@ function KmlPage() {
                   fontSize: '14px',
                   textAlign: 'left',
                   borderBottom: '1px solid #ddd',
-                }}>Nome</th>
+                }}>Nome do Arquivo</th>
+                <th style={{
+                  padding: '15px',
+                  backgroundColor: '#f4f4f4',
+                  color: '#333',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  borderBottom: '1px solid #ddd',
+                }}>ID</th>
                 <th style={{
                   padding: '15px',
                   backgroundColor: '#f4f4f4',
@@ -305,6 +250,7 @@ function KmlPage() {
                   onMouseOut={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fafafa' : 'white'}
                 >
                   <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>{kml.name}</td>
+                  <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px', color: '#666' }}>{kml.id}</td>
                   <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
                     <button
                       onClick={() => handleDelete(kml.id)}
@@ -339,6 +285,206 @@ function KmlPage() {
           Nenhum arquivo KML encontrado.
         </p>
       )}
+    </>
+  );
+
+  // Renderizar conteúdo da aba Talhões KML
+  const renderTalhoesKmlTab = () => (
+    <>
+      <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', alignItems: 'center' }}>
+        <button
+          onClick={fetchData}
+          disabled={isLoading}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: isLoading ? '#a0a0a0' : '#2196F3',
+            color: 'white',
+            border: 'none',
+            borderRadius: '5px',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+            fontSize: '16px',
+            transition: 'background-color 0.3s',
+          }}
+          onMouseOver={(e) => {
+            if (!isLoading) e.currentTarget.style.backgroundColor = '#1e88e5';
+          }}
+          onMouseOut={(e) => {
+            if (!isLoading) e.currentTarget.style.backgroundColor = '#2196F3';
+          }}
+        >
+          {isLoading ? 'Carregando...' : 'Atualizar'}
+        </button>
+        <div style={{ 
+          padding: '10px 15px', 
+          backgroundColor: '#e8f5e8', 
+          border: '1px solid #4caf50', 
+          borderRadius: '5px',
+          fontSize: '14px'
+        }}>
+          Total: {talhoesKml.length} talhões KML | Sem vínculo: {talhoesKmlSemVinculo.length}
+        </div>
+      </div>
+
+      {talhoesKml.length > 0 ? (
+        <div style={{
+          overflowX: 'auto',
+          borderRadius: '10px',
+          boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+        }}>
+          <table style={{
+            width: '100%',
+            borderCollapse: 'collapse',
+            backgroundColor: 'white',
+            borderRadius: '10px',
+            overflow: 'hidden',
+          }}>
+            <thead>
+              <tr>
+                <th style={{
+                  padding: '15px',
+                  backgroundColor: '#f4f4f4',
+                  color: '#333',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  borderBottom: '1px solid #ddd',
+                }}>Nome do Placemark</th>
+                <th style={{
+                  padding: '15px',
+                  backgroundColor: '#f4f4f4',
+                  color: '#333',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  borderBottom: '1px solid #ddd',
+                }}>Tipo de Geometria</th>
+                <th style={{
+                  padding: '15px',
+                  backgroundColor: '#f4f4f4',
+                  color: '#333',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  borderBottom: '1px solid #ddd',
+                }}>Status</th>
+                <th style={{
+                  padding: '15px',
+                  backgroundColor: '#f4f4f4',
+                  color: '#333',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  textAlign: 'left',
+                  borderBottom: '1px solid #ddd',
+                }}>ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {talhoesKml.map((talhaoKml, index) => {
+                const temVinculo = !talhoesKmlSemVinculo.some(t => t.id === talhaoKml.id);
+                return (
+                  <tr
+                    key={talhaoKml.id}
+                    style={{
+                      backgroundColor: index % 2 === 0 ? '#fafafa' : 'white',
+                      transition: 'background-color 0.3s',
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f0f0f0'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = index % 2 === 0 ? '#fafafa' : 'white'}
+                  >
+                    <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontWeight: 'bold' }}>
+                      {talhaoKml.placemark_name}
+                    </td>
+                    <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
+                      {talhaoKml.geometry_type}
+                    </td>
+                    <td style={{ padding: '15px', borderBottom: '1px solid #ddd' }}>
+                      <span style={{
+                        padding: '4px 8px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        color: 'white',
+                        backgroundColor: temVinculo ? '#4caf50' : '#ff9800'
+                      }}>
+                        {temVinculo ? 'Vinculado' : 'Sem vínculo'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '15px', borderBottom: '1px solid #ddd', fontSize: '12px', color: '#666' }}>
+                      {talhaoKml.id}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p style={{ textAlign: 'center', color: '#666', fontSize: '16px' }}>
+          Nenhum talhão KML encontrado.
+        </p>
+      )}
+    </>
+  );
+
+  return (
+    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif', maxWidth: '1200px', margin: '0 auto' }}>
+      <h2 style={{ fontSize: '24px', color: '#333', marginBottom: '20px' }}>Gerenciamento de KML</h2>
+
+      {message && (
+        <p
+          style={{
+            padding: '10px',
+            backgroundColor: message.includes('Erro') ? '#f8d7da' : '#d4edda',
+            color: message.includes('Erro') ? '#721c24' : '#155724',
+            border: `1px solid ${message.includes('Erro') ? '#f5c6cb' : '#c3e6cb'}`,
+            borderRadius: '5px',
+            marginBottom: '20px',
+            textAlign: 'center',
+          }}
+        >
+          {message}
+        </p>
+      )}
+
+      {/* Navegação por abas */}
+      <div style={{ marginBottom: '20px', borderBottom: '2px solid #e0e0e0' }}>
+        <button
+          onClick={() => setActiveTab('kml')}
+          style={{
+            padding: '12px 24px',
+            marginRight: '8px',
+            backgroundColor: activeTab === 'kml' ? '#2196F3' : 'transparent',
+            color: activeTab === 'kml' ? 'white' : '#666',
+            border: 'none',
+            borderBottom: activeTab === 'kml' ? '3px solid #2196F3' : '3px solid transparent',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'kml' ? 'bold' : 'normal',
+            transition: 'all 0.3s ease',
+          }}
+        >
+          Arquivos KML
+        </button>
+        <button
+          onClick={() => setActiveTab('talhoes')}
+          style={{
+            padding: '12px 24px',
+            backgroundColor: activeTab === 'talhoes' ? '#2196F3' : 'transparent',
+            color: activeTab === 'talhoes' ? 'white' : '#666',
+            border: 'none',
+            borderBottom: activeTab === 'talhoes' ? '3px solid #2196F3' : '3px solid transparent',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: activeTab === 'talhoes' ? 'bold' : 'normal',
+            transition: 'all 0.3s ease',
+          }}
+        >
+          Talhões KML
+        </button>
+      </div>
+
+      {/* Conteúdo da aba ativa */}
+      {activeTab === 'kml' ? renderKmlFilesTab() : renderTalhoesKmlTab()}
     </div>
   );
 }
