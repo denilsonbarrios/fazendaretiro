@@ -66,7 +66,7 @@ app.use(cors({
   credentials: true,
 }));
 
-// Middleware para parsing de JSON
+// Middleware para parsing de JSON (apenas para rotas que não usam multer)
 app.use(express.json());
 
 // Utility function to handle async route handlers
@@ -331,13 +331,13 @@ app.post(
 
     console.log('File received:', {
       originalname: req.file.originalname,
-      path: req.file.path,
       size: req.file.size,
       mimetype: req.file.mimetype,
+      buffer: req.file.buffer ? 'present' : 'missing',
     });
 
-    const filePath = req.file.path;
-    const kmlContent = await fs.readFile(filePath, 'utf-8');
+    // Para memoryStorage, o conteúdo está em req.file.buffer
+    const kmlContent = req.file.buffer.toString('utf-8');
     console.log('KML file read successfully, length:', kmlContent.length);
 
     let geojson: FeatureCollection;
@@ -475,8 +475,7 @@ app.post(
         console.log(`Talhão KML ${existingTalhaoKml.placemark_name} (ID: ${existingTalhaoKml.id}) removido`);
         removedKmlTalhoes++;
       }
-    }    await fs.unlink(filePath);
-    console.log('Temporary file deleted:', filePath);
+    }
 
     const message = `KML processado com sucesso. ${createdKmlTalhoes} novos talhões KML criados, ${updatedKmlTalhoes} atualizados.` +
       (removedKmlTalhoes > 0 ? ` ${removedKmlTalhoes} talhões KML removidos (não presentes no novo arquivo).` : '') +
@@ -606,10 +605,10 @@ app.get(
   '/talhoes_kml/sem-vinculo',
   asyncHandler(async (req, res, next) => {
     const talhoesKmlSemVinculo = await fetchQuery<any>(
-      `SELECT tk.* FROM talhoes_kml tk 
-       LEFT JOIN talhoes t ON t.talhao_kml_id = tk.id 
-       WHERE t.id IS NULL AND tk.ativo = 1
-       ORDER BY tk.placemark_name`, 
+      `SELECT * FROM talhoes_kml 
+       WHERE id NOT IN (SELECT talhao_kml_id FROM talhoes WHERE talhao_kml_id IS NOT NULL) 
+       AND ativo = 1
+       ORDER BY placemark_name`, 
       []
     );
     res.status(200).json(talhoesKmlSemVinculo);
