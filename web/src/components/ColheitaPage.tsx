@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import { ColheitaDashboard } from './ColheitaDashboard';
 import { toast } from 'react-toastify';
 import { Talhao, Carregamento, Motorista, PrevRealizado, Previsao, SemanaColheita, Safra, DinamicaData, CarregamentoFormData } from '../types';
-import { BASE_URL } from '../api';
+import { BASE_URL, authFetch } from '../api';
 
 interface ColheitaPageProps {
   safraId: string | null;
@@ -56,7 +56,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const fetchCarregamentosData = async () => {
     if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/carregamentos`);
+      const response = await authFetch(`${BASE_URL}/carregamentos`);
       if (!response.ok) throw new Error('Erro ao buscar carregamentos');
       const records = await response.json();
       const filteredRecords = records.filter((carregamento: Carregamento) => carregamento.safra_id === safraId);
@@ -70,7 +70,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const fetchPrevRealizadoData = async () => {
     if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/prev_realizado`);
+      const response = await authFetch(`${BASE_URL}/prev_realizado`);
       if (!response.ok) throw new Error('Erro ao buscar RESUMO');
       const records = await response.json();
       const filteredRecords = records.filter((item: PrevRealizado) => item.safra_id === safraId);
@@ -90,7 +90,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
 
   const fetchPrevisoesData = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/previsoes`);
+      const response = await authFetch(`${BASE_URL}/previsoes`);
       if (!response.ok) throw new Error('Erro ao buscar previsões');
       const records = await response.json();
       const filteredRecords = safraId ? records.filter((previsao: Previsao) => previsao.safra_id === safraId) : records;
@@ -114,7 +114,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const fetchSemanasColheitaData = async () => {
     if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/safras/${safraId}/semanas`);
+      const response = await authFetch(`${BASE_URL}/safras/${safraId}/semanas`);
       if (!response.ok) throw new Error('Erro ao buscar semanas de colheita');
       const records = await response.json();
       setSemanasColheita(records);
@@ -125,7 +125,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
 
   const fetchSafrasData = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/safras`);
+      const response = await authFetch(`${BASE_URL}/safras`);
       if (!response.ok) throw new Error('Erro ao buscar safras');
       const records = await response.json();
       setSafras(records);
@@ -137,7 +137,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const fetchTalhoesData = async () => {
     if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/talhoes-apenas-safra/${safraId}`);
+      const response = await authFetch(`${BASE_URL}/talhoes-apenas-safra/${safraId}`);
       if (!response.ok) throw new Error('Erro ao buscar talhões da safra');
       const data = await response.json();
       const records = data.talhoes || [];
@@ -172,7 +172,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
 
   const fetchMotoristas = async (searchTerm: string) => {
     try {
-      const response = await fetch(`${BASE_URL}/motoristas?search=${searchTerm}`);
+      const response = await authFetch(`${BASE_URL}/motoristas?search=${searchTerm}`);
       if (!response.ok) throw new Error('Erro ao buscar motoristas');
       const records = await response.json();
       setMotoristas(records);
@@ -433,7 +433,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       const url = isEditing ? `${BASE_URL}/carregamentos/${carregamentoFormData.id}` : `${BASE_URL}/carregamentos`;
       const method = isEditing ? 'PUT' : 'POST';
 
-      const response = await fetch(url, {
+      const response = await authFetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(carregamento),
@@ -481,7 +481,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     if (!window.confirm('Tem certeza que deseja excluir este carregamento?')) return;
 
     try {
-      const response = await fetch(`${BASE_URL}/carregamentos/${id}`, {
+      const response = await authFetch(`${BASE_URL}/carregamentos/${id}`, {
         method: 'DELETE',
       });
       if (!response.ok) {
@@ -574,7 +574,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
     }
 
     try {
-      const response = await fetch(`${BASE_URL}/previsoes`, {
+      const response = await authFetch(`${BASE_URL}/previsoes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -617,7 +617,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
   const cadastrarMotorista = async (nome: string): Promise<Motorista> => {
     try {
       const motoristaNome = nome.toUpperCase();
-      const response = await fetch(`${BASE_URL}/motoristas?search=${motoristaNome}`);
+      const response = await authFetch(`${BASE_URL}/motoristas?search=${motoristaNome}`);
       if (!response.ok) {
         throw new Error(`Erro ao buscar motorista ${motoristaNome}: ${response.status} ${response.statusText}`);
       }
@@ -630,7 +630,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
         return motoristaExistente;
       }
 
-      const createResponse = await fetch(`${BASE_URL}/motoristas`, {
+      const createResponse = await authFetch(`${BASE_URL}/motoristas`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nome: motoristaNome }),
@@ -659,7 +659,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       if (existingTalhao) {
         if (!existingTalhao.ativo) {
           const updatedTalhao = { ...existingTalhao, ativo: true };
-          const response = await fetch(`${BASE_URL}/talhoes/${existingTalhao.id}`, {
+          const response = await authFetch(`${BASE_URL}/talhoes/${existingTalhao.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updatedTalhao),
@@ -694,7 +694,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
         ativo: true,
       };
 
-      const response = await fetch(`${BASE_URL}/talhoes`, {
+      const response = await authFetch(`${BASE_URL}/talhoes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(talhaoData),
@@ -790,7 +790,7 @@ function ColheitaPage({ safraId }: ColheitaPageProps) {
       }
 
       for (const carregamento of carregamentosToImport) {
-        const response = await fetch(`${BASE_URL}/carregamentos`, {
+        const response = await authFetch(`${BASE_URL}/carregamentos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(carregamento),

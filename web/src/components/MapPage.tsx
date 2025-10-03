@@ -1,7 +1,7 @@
 import { MapContainer, TileLayer, Polygon, useMap, LayersControl, Marker, Popup } from 'react-leaflet';
 import { useEffect, useState, useRef } from 'react';
 import { useMapData } from '../hooks/useMapData';
-import { BASE_URL } from '../api';
+import { BASE_URL, authFetch } from '../api';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { toast } from 'react-toastify';
@@ -50,7 +50,7 @@ function MapPage({ safraId }: MapPageProps) {
   const fetchProducaoCaixa = async (talhaoId: string) => {
     if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/talhoes/${talhaoId}/producao_caixa?safra_id=${safraId}`);
+      const response = await authFetch(`${BASE_URL}/talhoes/${talhaoId}/producao_caixa?safra_id=${safraId}`);
       if (!response.ok) throw new Error('Erro ao buscar produção de caixas');
       const data = await response.json();
       setProducaoCaixa(data.totalCaixas);
@@ -62,11 +62,11 @@ function MapPage({ safraId }: MapPageProps) {
 
   const fetchConfigs = async () => {
     try {
-      const tipoResponse = await fetch(`${BASE_URL}/tipo_configs`);
+      const tipoResponse = await authFetch(`${BASE_URL}/tipo_configs`);
       if (!tipoResponse.ok) throw new Error('Erro ao buscar tipos');
       const tipoRecords = await tipoResponse.json();
 
-      const variedadeResponse = await fetch(`${BASE_URL}/variedade_configs`);
+      const variedadeResponse = await authFetch(`${BASE_URL}/variedade_configs`);
       if (!variedadeResponse.ok) throw new Error('Erro ao buscar variedades');
       const variedadeRecords = await variedadeResponse.json();
 
@@ -141,7 +141,7 @@ function MapPage({ safraId }: MapPageProps) {
         ativo: formData.ativo,
       };
 
-      const response = await fetch(`${BASE_URL}/talhoes/${editingTalhao.id}`, {
+      const response = await authFetch(`${BASE_URL}/talhoes/${editingTalhao.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(talhaoData),

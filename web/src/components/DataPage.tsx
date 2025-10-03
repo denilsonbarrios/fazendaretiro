@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'react-toastify'; // Importar o toast
-import { fetchSafras, Safra, fetchTalhoesKml, linkTalhaoToKml, TalhaoKml, importTalhoesFromCsv, BASE_URL } from '../api';
+import { fetchSafras, Safra, fetchTalhoesKml, linkTalhaoToKml, TalhaoKml, importTalhoesFromCsv, BASE_URL, authFetch } from '../api';
 
 // Interfaces definidas localmente com base nos dados retornados pelo backend
 interface Talhao {
@@ -77,11 +77,11 @@ function DataPage({ safraId }: DataPageProps) {
 
   const fetchConfigs = async () => {
     try {
-      const tipoResponse = await fetch(`${BASE_URL}/tipo_configs`);
+      const tipoResponse = await authFetch(`${BASE_URL}/tipo_configs`);
       if (!tipoResponse.ok) throw new Error('Erro ao buscar tipos');
       const tipoRecords = await tipoResponse.json();
 
-      const variedadeResponse = await fetch(`${BASE_URL}/variedade_configs`);
+      const variedadeResponse = await authFetch(`${BASE_URL}/variedade_configs`);
       if (!variedadeResponse.ok) throw new Error('Erro ao buscar variedades');
       const variedadeRecords = await variedadeResponse.json();
 
@@ -113,7 +113,7 @@ function DataPage({ safraId }: DataPageProps) {
       return;
     }
     try {
-      const response = await fetch(`${BASE_URL}/talhao_safra?safra_id=${safraId}`);
+      const response = await authFetch(`${BASE_URL}/talhao_safra?safra_id=${safraId}`);
       if (!response.ok) throw new Error('Erro ao buscar talhões da safra');
       const talhaoRecords = await response.json();
       setTalhoes(talhaoRecords);
@@ -126,7 +126,7 @@ function DataPage({ safraId }: DataPageProps) {
   // Busca talhões base (sem vínculo de safra)
   const fetchTalhoesBase = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/talhoes`);
+      const response = await authFetch(`${BASE_URL}/talhoes`);
       if (!response.ok) throw new Error('Erro ao buscar talhões base');
       const talhaoRecords = await response.json();
       setTalhoesBase(talhaoRecords);
@@ -152,7 +152,7 @@ function DataPage({ safraId }: DataPageProps) {
     const producao: { [talhaoId: string]: number } = {};
     for (const talhao of talhoes) {
       try {
-        const response = await fetch(`${BASE_URL}/talhoes/${talhao.id}/producao_caixa?safra_id=${safraId}`);
+        const response = await authFetch(`${BASE_URL}/talhoes/${talhao.id}/producao_caixa?safra_id=${safraId}`);
         if (!response.ok) throw new Error(`Erro ao buscar produção de caixas para talhão ${talhao.id}`);
         const data = await response.json();
         producao[talhao.id] = data.totalCaixas;
@@ -167,7 +167,7 @@ function DataPage({ safraId }: DataPageProps) {
   const fetchKmlTalhoes = async () => {
     if (!safraId) return;
     try {
-      const response = await fetch(`${BASE_URL}/talhao_safra/kml?safra_id=${safraId}`);
+      const response = await authFetch(`${BASE_URL}/talhao_safra/kml?safra_id=${safraId}`);
       if (!response.ok) throw new Error('Erro ao buscar talhões KML');
       const kmlRecords = await response.json();
       setTalhoesKml(kmlRecords);
@@ -311,7 +311,7 @@ function DataPage({ safraId }: DataPageProps) {
         
         if (editingId) {
           // Atualizar talhão base existente
-          const response = await fetch(`${BASE_URL}/talhoes/${editingId}`, {
+          const response = await authFetch(`${BASE_URL}/talhoes/${editingId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(talhaoBaseData),
@@ -323,7 +323,7 @@ function DataPage({ safraId }: DataPageProps) {
           toast.success('Talhão base atualizado com sucesso!');
         } else {
           // Criar novo talhão base
-          const response = await fetch(`${BASE_URL}/talhoes`, {
+          const response = await authFetch(`${BASE_URL}/talhoes`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(talhaoBaseData),
@@ -390,7 +390,7 @@ function DataPage({ safraId }: DataPageProps) {
       
       if (existingVinculo) {
         // Atualiza registro existente em talhao_safra
-        const response = await fetch(`${BASE_URL}/talhao_safra/${existingVinculo.id}`, {
+        const response = await authFetch(`${BASE_URL}/talhao_safra/${existingVinculo.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(talhaoSafraData),
@@ -402,7 +402,7 @@ function DataPage({ safraId }: DataPageProps) {
         toast.success('Talhão atualizado com sucesso!');
       } else {
         // Cria novo vínculo em talhao_safra
-        const response = await fetch(`${BASE_URL}/talhao_safra`, {
+        const response = await authFetch(`${BASE_URL}/talhao_safra`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(talhaoSafraData),
@@ -448,7 +448,7 @@ function DataPage({ safraId }: DataPageProps) {
 
   const handleDelete = async (id: string) => {
     try {
-      const response = await fetch(`${BASE_URL}/talhoes/${id}`, { method: 'DELETE' });
+      const response = await authFetch(`${BASE_URL}/talhoes/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Erro ao excluir talhão');
       setFilterText('');
       setFilterType('Todos');
@@ -465,7 +465,7 @@ function DataPage({ safraId }: DataPageProps) {
     try {
       // Buscar talhão base correspondente
       const talhaoBaseId = (talhao as any).talhao_id || talhao.id;
-      const responseBase = await fetch(`${BASE_URL}/talhoes`);
+      const responseBase = await authFetch(`${BASE_URL}/talhoes`);
       if (!responseBase.ok) throw new Error('Erro ao buscar talhões base');
       
       const talhoesBase = await responseBase.json();
@@ -490,7 +490,7 @@ function DataPage({ safraId }: DataPageProps) {
         ativo: talhaoBase.ativo
       };
 
-      const response = await fetch(`${BASE_URL}/talhao_safra/${talhao.id}`, {
+      const response = await authFetch(`${BASE_URL}/talhao_safra/${talhao.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updateData),
@@ -585,7 +585,7 @@ function DataPage({ safraId }: DataPageProps) {
       } else {
         body.origem = 'base';
       }
-      const response = await fetch(`${BASE_URL}/talhao_safra/importar`, {
+      const response = await authFetch(`${BASE_URL}/talhao_safra/importar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BASE_URL } from '../api';
+import { BASE_URL, authFetch } from '../api';
 
 // Interfaces definidas localmente com base nos dados retornados pelo backend
 interface ConfigOption {
@@ -36,11 +36,11 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
 
   const fetchConfigs = async () => {
     try {
-      const tipoResponse = await fetch(`${BASE_URL}/tipo_configs`);
+      const tipoResponse = await authFetch(`${BASE_URL}/tipo_configs`);
       if (!tipoResponse.ok) throw new Error('Erro ao buscar tipos');
       const tipoRecords = await tipoResponse.json();
 
-      const variedadeResponse = await fetch(`${BASE_URL}/variedade_configs`);
+      const variedadeResponse = await authFetch(`${BASE_URL}/variedade_configs`);
       if (!variedadeResponse.ok) throw new Error('Erro ao buscar variedades');
       const variedadeRecords = await variedadeResponse.json();
 
@@ -54,7 +54,7 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
 
   const fetchSafrasData = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/safras`);
+      const response = await authFetch(`${BASE_URL}/safras`);
       if (!response.ok) throw new Error('Erro ao buscar safras');
       const records = await response.json();
       console.log('ConfigPage: Safras carregadas:', JSON.stringify(records, null, 2));
@@ -79,14 +79,14 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
         default_color: tipoFormData.defaultColor,
       };
       if (tipoFormData.editingId) {
-        const response = await fetch(`${BASE_URL}/tipo_configs/${tipoFormData.editingId}`, {
+        const response = await authFetch(`${BASE_URL}/tipo_configs/${tipoFormData.editingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configData),
         });
         if (!response.ok) throw new Error('Erro ao atualizar tipo');
       } else {
-        const response = await fetch(`${BASE_URL}/tipo_configs`, {
+        const response = await authFetch(`${BASE_URL}/tipo_configs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configData),
@@ -111,14 +111,14 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
         default_color: variedadeFormData.defaultColor,
       };
       if (variedadeFormData.editingId) {
-        const response = await fetch(`${BASE_URL}/variedade_configs/${variedadeFormData.editingId}`, {
+        const response = await authFetch(`${BASE_URL}/variedade_configs/${variedadeFormData.editingId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configData),
         });
         if (!response.ok) throw new Error('Erro ao atualizar variedade');
       } else {
-        const response = await fetch(`${BASE_URL}/variedade_configs`, {
+        const response = await authFetch(`${BASE_URL}/variedade_configs`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(configData),
@@ -158,14 +158,14 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
       };
 
       if (safraFormData.id) {
-        const response = await fetch(`${BASE_URL}/safras/${safraFormData.id}`, {
+        const response = await authFetch(`${BASE_URL}/safras/${safraFormData.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(safraData),
         });
         if (!response.ok) throw new Error('Erro ao atualizar safra');
       } else {
-        const response = await fetch(`${BASE_URL}/safras`, {
+        const response = await authFetch(`${BASE_URL}/safras`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(safraData),
@@ -214,7 +214,7 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
 
   const handleDeleteTipo = async (id: string) => {
     try {
-      const response = await fetch(`${BASE_URL}/tipo_configs/${id}`, { method: 'DELETE' });
+      const response = await authFetch(`${BASE_URL}/tipo_configs/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Erro ao excluir tipo');
       await fetchConfigs();
       setMessage('Tipo excluído com sucesso!');
@@ -225,7 +225,7 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
 
   const handleDeleteVariedade = async (id: string) => {
     try {
-      const response = await fetch(`${BASE_URL}/variedade_configs/${id}`, { method: 'DELETE' });
+      const response = await authFetch(`${BASE_URL}/variedade_configs/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Erro ao excluir variedade');
       await fetchConfigs();
       setMessage('Variedade excluída com sucesso!');
@@ -236,7 +236,7 @@ function ConfigPage({ onSafraChange }: ConfigPageProps) {
 
   const handleDeleteSafra = async (id: string) => {
     try {
-      const response = await fetch(`${BASE_URL}/safras/${id}`, { method: 'DELETE' });
+      const response = await authFetch(`${BASE_URL}/safras/${id}`, { method: 'DELETE' });
       if (!response.ok) throw new Error('Erro ao excluir safra');
       await fetchSafrasData();
       if (onSafraChange) {

@@ -4,7 +4,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { LoginPage } from './components/LoginPage';
-import { BASE_URL } from './api';
+import { BASE_URL, authFetch } from './api';
 
 // Carregar componentes de forma assíncrona
 const MapPage = lazy(() => import('./components/MapPage'));
@@ -55,7 +55,7 @@ function AppContent() {
 
   const fetchSafras = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/safras`, {
+      const response = await authFetch(`${BASE_URL}/safras`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) throw new Error('Erro ao buscar safras');
@@ -90,7 +90,7 @@ function AppContent() {
     try {
       const dataInicial = newSafraDataInicial ? new Date(newSafraDataInicial).getTime() : null;
 
-      const response = await fetch(`${BASE_URL}/safras`, {
+      const response = await authFetch(`${BASE_URL}/safras`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from 'react-toastify';
-import { BASE_URL } from '../api';
+import { BASE_URL, authFetch } from '../api';
 
 interface User {
   id: string;
@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (savedToken && savedUser) {
         try {
-          const response = await fetch(`${BASE_URL}/auth/verify`, {
+          const response = await authFetch(`${BASE_URL}/auth/verify`, {
             headers: {
               'Authorization': `Bearer ${savedToken}`
             }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
-import { BASE_URL } from '../api';
+import { BASE_URL, authFetch } from '../api';
 import '../styles/main.scss';
 
 interface LoginPageProps {
@@ -32,7 +32,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         ? { username, password, nome, registrationKey }
         : { username, password };
 
-      const response = await fetch(`${BASE_URL}${endpoint}`, {
+      const response = await authFetch(`${BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

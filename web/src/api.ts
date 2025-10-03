@@ -13,7 +13,7 @@ function getAuthHeaders(): HeadersInit {
 }
 
 // Wrapper para fetch que sempre adiciona autenticação
-async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const defaultOptions: RequestInit = {
     headers: getAuthHeaders(),
   };
