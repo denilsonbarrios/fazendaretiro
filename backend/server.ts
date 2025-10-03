@@ -547,8 +547,8 @@ app.post(
         if (existingTalhaoKml) {
           // Atualizar talhão KML existente
           await runQuery(
-            'UPDATE talhoes_kml SET geometry = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [JSON.stringify(feature.geometry), existingTalhaoKml.id]
+            'UPDATE talhoes_kml SET coordinates = ?, geometry_type = ?, kml_file_id = ?, data_importacao = (EXTRACT(epoch FROM now()))::bigint WHERE id = ?',
+            [JSON.stringify(feature.geometry), feature.geometry.type, kmlId, existingTalhaoKml.id]
           );
           console.log(`Talhão KML ${placemarkName} atualizado`);
           updatedKmlTalhoes++;
@@ -556,8 +556,8 @@ app.post(
           // Criar novo talhão KML
           const talhaoKmlId = generateId();
           await runQuery(
-            'INSERT INTO talhoes_kml (id, placemark_name, geometry, ativo, created_at, updated_at) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)',
-            [talhaoKmlId, placemarkName, JSON.stringify(feature.geometry)]
+            'INSERT INTO talhoes_kml (id, placemark_name, coordinates, geometry_type, kml_file_id, ativo, data_importacao) VALUES (?, ?, ?, ?, ?, 1, (EXTRACT(epoch FROM now()))::bigint)',
+            [talhaoKmlId, placemarkName, JSON.stringify(feature.geometry), feature.geometry.type, kmlId]
           );
           console.log(`Novo talhão KML ${placemarkName} criado`);
           createdKmlTalhoes++;
