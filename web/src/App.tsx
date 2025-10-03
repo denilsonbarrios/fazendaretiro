@@ -1,7 +1,9 @@
 import { useState, useEffect, Suspense, lazy } from 'react';
 import './styles/main.scss';
-import { ToastContainer } from 'react-toastify'; // Importar o ToastContainer
-import 'react-toastify/dist/ReactToastify.css'; // Importar os estilos padrão do Toastify
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { LoginPage } from './components/LoginPage';
 
 // Carregar componentes de forma assíncrona
 const MapPage = lazy(() => import('./components/MapPage'));
@@ -19,6 +21,15 @@ interface Safra {
 }
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
+
+function AppContent() {
+  const { isAuthenticated, isLoading, login, logout, user } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('map');
   const [safras, setSafras] = useState<Safra[]>([]);
   const [selectedSafra, setSelectedSafra] = useState<string | null>(null);
@@ -27,7 +38,7 @@ export default function App() {
   const [newSafraName, setNewSafraName] = useState<string>('');
   const [newSafraDataInicial, setNewSafraDataInicial] = useState<string>('');
 
-  const BASE_URL = import.meta.env.VITE_BASE_URL || 'http://localhost:3000';
+  const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   const fetchSafras = async () => {
     try {
@@ -45,8 +56,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchSafras();
-  }, []);
+    if (isAuthenticated) {
+      fetchSafras();
+    }
+  }, [isAuthenticated]);
 
   const handleSafraChange = (safraId: string) => {
     setSelectedSafra(safraId);
@@ -99,6 +112,25 @@ export default function App() {
     return <div>{error}</div>;
   }
 
+  if (isLoading) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        fontSize: '18px',
+        color: '#666'
+      }}>
+        Carregando...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginPage onLoginSuccess={login} />;
+  }
+
   return (
     <div className="app-container">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 20px', backgroundColor: '#fff', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>
@@ -134,7 +166,10 @@ export default function App() {
             Configurações
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <span style={{ fontSize: '14px', color: '#666' }}>
+            Olá, <strong>{user?.nome || user?.username}</strong>
+          </span>
           <label>Safra: </label>
           <select value={selectedSafra || ''} onChange={(e) => handleSafraChange(e.target.value)}>
             {safras.map((safra) => (
@@ -156,6 +191,19 @@ export default function App() {
             }}
           >
             Nova Safra
+          </button>
+          <button
+            onClick={logout}
+            style={{
+              padding: '5px 10px',
+              backgroundColor: '#f44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            Sair
           </button>
         </div>
       </div>
