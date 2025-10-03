@@ -62,9 +62,8 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5000',
   'http://localhost:4173',
-  // Adicionar URLs de produção quando deployar:
-  // 'https://fazendaretiro.vercel.app',
-  // 'https://seu-dominio-custom.com',
+  // URLs de produção
+  'https://fazendaretiro-frontend.vercel.app',
 ];
 
 // Enable CORS for requests from the frontend origin
