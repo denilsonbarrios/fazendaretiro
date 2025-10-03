@@ -374,7 +374,7 @@ function MapPage({ safraId }: MapPageProps) {
                             <strong>Nome:</strong> {talhao.NOME}<br />
                             <strong>Área:</strong> {talhao.AREA}<br />
                             <strong>Variedade:</strong> {talhao.VARIEDADE}<br />
-                            <strong>Data de Plantio:</strong> {formatBrazilianDate(talhao.DATA_DE_PLANTIO)}<br />
+                            <strong>Data de Plantio:</strong> {formatBrazilianDate(talhao.DATA_DE_PLANTIO ?? '')}<br />
                             <strong>Idade:</strong> {talhao.IDADE}
                             <button
                               onClick={() => handleEditTalhao(talhao)}
@@ -561,7 +561,7 @@ function MapPage({ safraId }: MapPageProps) {
                     borderBottom: '1px solid #ddd',
                     fontSize: '14px',
                     color: '#333',
-                  }}>{formatBrazilianDate(selectedTalhao.DATA_DE_PLANTIO)}</td>
+                  }}>{formatBrazilianDate(selectedTalhao.DATA_DE_PLANTIO ?? '')}</td>
                 </tr>
                 <tr>
                   <td style={{
